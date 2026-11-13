@@ -1,0 +1,22 @@
+# ── LinkSec·AutoTest AI ─────────────────────────────────────────────
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 运行时数据（SQLite 快照，勿提交）
+backend/data/
+*.db
+*.sqlite3
+
+# 环境变量与密钥（严禁提交）
+.env
+*.key
+*.pem
+
+# 临时与日志
+*.log
+.DS_Store
+Thumbs.db

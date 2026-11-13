@@ -1,0 +1,19 @@
+LinkSec·AutoTest AI
+Copyright 2026 deislerkk
+
+本产品功能设计部分参照了采用 Apache License 2.0 的开源项目
+CyberStrikeAI（原作者 Ed1s0nZ，https://github.com/AIPentest/CyberStrikeAI），
+依照 Apache License 2.0 第 4 条在此保留其署名声明。
+
+本项目为独立实现：
+- 后端为 Python/Flask 实现（原项目为 Go 实现），全部代码独立编写；
+- v3.3 起新增的资产管理、平台 RBAC、人机协同审批、机器人接入、
+  SQLite 持久化、漏洞状态流转、攻击链图谱、AI 多智能体编排、
+  报告导出、Token 用量统计等模块均为本项目原创实现。
+
+第三方资源声明：
+- Tabler Icons（tabler-icons）— MIT License，https://tabler.io/icons
+- JetBrains Mono 字体 — SIL Open Font License 1.1
+- Syne 字体 — SIL Open Font License 1.1
+- 扫描工具链（nmap、masscan、nikto、nuclei、hydra 等）仅以
+  运行时安装/调用方式使用，随各发行版官方源分发，本仓库不包含其代码。

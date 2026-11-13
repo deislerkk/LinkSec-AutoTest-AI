@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+
+  # ── 后端 API（基于 Kali Linux 镜像，内含所有扫描工具）──────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: linksec-backend
+    restart: unless-stopped
+    # nmap SYN 扫描需要 NET_RAW / NET_ADMIN 能力
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    network_mode: host          # 使用宿主机网络，确保能扫描内网
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - FLASK_ENV=production
+    volumes:
+      - /usr/share/wordlists:/usr/share/wordlists:ro   # 挂载宿主机字典
+      - linksec-tmp:/tmp
+
+  # ── 前端 Nginx ─────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: linksec-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  linksec-tmp:
