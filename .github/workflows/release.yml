@@ -1,0 +1,31 @@
+# LinkSec·AutoTest AI — 自动 Release（推送 v* 标签触发）
+# 用法：git tag v3.5.0 && git push origin --tags
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 打包部署包（zip，排除 .git 与运行时数据）
+        run: |
+          mkdir -p dist
+          zip -r dist/LinkSec_AutoTest_AI_${GITHUB_REF_NAME}.zip . \
+            -x ".git/*" "backend/data/*" "*.db" ".env" "dist/*"
+
+      - name: 创建 Release 并上传制品
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: dist/*.zip
