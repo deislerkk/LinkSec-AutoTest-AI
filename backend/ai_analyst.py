@@ -21,6 +21,52 @@ SYSTEM_PROMPT = """你是 LinkSec·AutoTest AI 平台的核心安全分析引擎
 对于 CVE 漏洞，请结合具体目标环境分析实际威胁。"""
 
 
+AGENT_SYSTEM_PROMPT = """你是 LinkSec·AutoTest AI 平台的自主安全测试智能体。
+你可以通过工具调用（function calling）驱动平台扫描引擎完成任务：
+- 需要扫描目标时调用 nmap_scan（可多次、换不同 profile）
+- 需要查看已有资产时调用 list_assets
+- 需要读取扫描结果时调用 get_scan
+- 需要生成报告时调用 create_report
+优先用工具获取真实数据，再基于数据给出分析结论。以简洁专业的中文回答。"""
+
+AGENT_TOOLS_SCHEMA = [
+    {
+        'name': 'nmap_scan',
+        'description': '对目标执行扫描（真实调用平台扫描引擎），返回主机与漏洞摘要',
+        'input_schema': {
+            'type': 'object',
+            'properties': {
+                'target': {'type': 'string', 'description': '目标 IP / CIDR / 域名'},
+                'profile': {'type': 'string', 'enum': ['quick_recon', 'full_pentest', 'stealth', 'web_app_audit'],
+                            'description': '扫描配置，默认 quick_recon'},
+            },
+            'required': ['target'],
+        },
+    },
+    {
+        'name': 'list_assets',
+        'description': '列出平台资产台账（域名/IP/端口/服务，含扫描覆盖与漏洞关联数）',
+        'input_schema': {'type': 'object', 'properties': {}},
+    },
+    {
+        'name': 'get_scan',
+        'description': '读取指定扫描任务的详情（阶段状态、主机、漏洞、风险评分）',
+        'input_schema': {
+            'type': 'object',
+            'properties': {'scan_id': {'type': 'string', 'description': '扫描任务 ID'}},
+            'required': ['scan_id'],
+        },
+    },
+    {
+        'name': 'create_report',
+        'description': '为指定扫描任务生成渗透测试报告',
+        'input_schema': {
+            'type': 'object',
+            'properties': {'scan_id': {'type': 'string'}},
+            'required': ['scan_id'],
+        },
+    },
+]
 class AIAnalyst:
     def __init__(self):
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
@@ -155,6 +201,98 @@ class AIAnalyst:
         result['usage'] = {'prompt_tokens': pt, 'completion_tokens': ct,
                            'total_tokens': pt + ct, 'estimated': True}
         return result
+
+    # ─── Agent 工具调用循环（v3.5：AI 通过 function calling 驱动平台工具）─────
+
+    def agent_run(self, goal, tool_executor, max_iters=8):
+        """自主智能体循环：AI 决策 → 调用平台工具 → 读取结果 → 继续，直至给出结论。
+
+        tool_executor: {tool_name: callable(**params) -> str}
+        真实 AI 模式：Claude function calling（tools 协议）
+        模拟模式：内置决策序列，仍真实调用 tool_executor（可离线演示）
+        """
+        if self.client:
+            return self._real_agent(goal, tool_executor, max_iters)
+        return self._mock_agent(goal, tool_executor)
+
+    def _run_tool(self, tool_executor, name, params):
+        try:
+            fn = tool_executor.get(name)
+            if not fn:
+                return f'工具 {name} 未注册'
+            return str(fn(**params))[:2000]
+        except Exception as e:
+            return f'工具执行异常：{type(e).__name__}'
+
+    def _real_agent(self, goal, tool_executor, max_iters):
+        messages = [{'role': 'user', 'content': goal}]
+        calls = []
+        pt = ct = 0
+        try:
+            for i in range(max_iters):
+                resp = self.client.messages.create(
+                    model='claude-sonnet-4-20250514',
+                    max_tokens=1024,
+                    system=AGENT_SYSTEM_PROMPT,
+                    messages=messages,
+                    tools=AGENT_TOOLS_SCHEMA,
+                )
+                u = resp.usage
+                pt += u.input_tokens
+                ct += u.output_tokens
+                messages.append({'role': 'assistant', 'content': resp.content})
+                if resp.stop_reason == 'tool_use':
+                    for block in resp.content:
+                        if block.type == 'tool_use':
+                            result = self._run_tool(tool_executor, block.name, block.input or {})
+                            calls.append({'tool': block.name, 'params': block.input or {}, 'result': result[:300]})
+                            messages.append({'role': 'user', 'content': [
+                                {'type': 'tool_result', 'tool_use_id': block.id, 'content': result}]})
+                    continue
+                text = ''.join(b.text for b in resp.content if b.type == 'text')
+                return {'success': True, 'iterations': i + 1, 'tool_calls': calls,
+                        'analysis': text,
+                        'usage': {'prompt_tokens': pt, 'completion_tokens': ct,
+                                  'total_tokens': pt + ct, 'estimated': False}}
+            return {'success': True, 'iterations': max_iters, 'tool_calls': calls,
+                    'analysis': '达到最大迭代次数，任务未完全收敛。',
+                    'usage': {'prompt_tokens': pt, 'completion_tokens': ct,
+                              'total_tokens': pt + ct, 'estimated': False}}
+        except Exception as e:
+            return {'success': False, 'error': f'Agent 执行异常：{type(e).__name__}',
+                    'tool_calls': calls}
+
+    def _mock_agent(self, goal, tool_executor):
+        """模拟模式：内置决策序列，但工具调用是真实执行（离线可演示）。"""
+        import re as _re
+        calls = []
+        # 1) 查看资产台账
+        if 'list_assets' in tool_executor:
+            r = self._run_tool(tool_executor, 'list_assets', {})
+            calls.append({'tool': 'list_assets', 'params': {}, 'result': r[:300]})
+        # 2) 提取目标并发起扫描
+        target = ''
+        m = _re.search(r'(\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?|[a-zA-Z0-9.-]+\.(?:com|cn|net|org|local|lan|example))', goal)
+        if m:
+            target = m.group(1)
+        if not target:
+            target = '127.0.0.1'
+        profile = 'web_app_audit' if ('web' in goal.lower() or 'http' in goal.lower()) else 'full_pentest'
+        if 'nmap_scan' in tool_executor:
+            r = self._run_tool(tool_executor, 'nmap_scan', {'target': target, 'profile': profile})
+            calls.append({'tool': 'nmap_scan', 'params': {'target': target, 'profile': profile}, 'result': r[:300]})
+        # 3) 汇总分析
+        summary = f'已完成对 {target} 的 {profile} 扫描（真实调用扫描引擎，共 {len(calls)} 次工具调用）。\n\n'
+        summary += ('分析结论：基于工具返回的实际结果，目标暴露面已录入资产台账；'
+                    '建议结合漏洞管理页的严重/高危清单按 P0→P1→P2 分级处置，'
+                    '并优先验证边界设备与 Web 服务的已知 CVE。')
+        out_text = goal + summary + json.dumps([c['result'] for c in calls], ensure_ascii=False)
+        pt = estimate_tokens(goal)
+        ct = estimate_tokens(out_text)
+        return {'success': True, 'iterations': len(calls), 'tool_calls': calls,
+                'analysis': summary,
+                'usage': {'prompt_tokens': pt, 'completion_tokens': ct,
+                          'total_tokens': pt + ct, 'estimated': True}}
 
     # ─── 真实 AI 调用 ──────────────────────────────────────────────────────────
 

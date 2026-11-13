@@ -38,8 +38,36 @@ RESOURCE_WRITE = {
 ADMIN_ONLY_RES = {'users', 'roles'}
 
 
-def _hash(pwd, salt):
+# ── 密码哈希（v3.5：scrypt 内存难哈希，替代 SHA-256+短盐）───────────────────
+SCRYPT_N, SCRYPT_R, SCRYPT_P = 2 ** 14, 8, 1
+
+
+def _hash_scrypt(pwd, salt_hex):
+    return hashlib.scrypt(pwd.encode('utf-8'), salt=bytes.fromhex(salt_hex),
+                          n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, dklen=32).hex()
+
+
+def _legacy_hash(pwd, salt):
+    """兼容 v3.4 及更早的 SHA-256 格式（仅用于登录校验，校验通过后自动升级）。"""
     return hashlib.sha256((salt + pwd).encode('utf-8')).hexdigest()
+
+
+def _make_pwd_hash(password):
+    salt = secrets.token_hex(16)
+    return f'scrypt${SCRYPT_N}${SCRYPT_R}${SCRYPT_P}${salt}${_hash_scrypt(password, salt)}'
+
+
+def _verify_pwd(password, stored):
+    """校验 scrypt 格式哈希，返回 (ok, needs_upgrade)。"""
+    if stored and stored.startswith('scrypt$'):
+        try:
+            _, n, r, p, salt, h = stored.split('$')
+            calc = hashlib.scrypt(password.encode('utf-8'), salt=bytes.fromhex(salt),
+                                  n=int(n), r=int(r), p=int(p), dklen=32).hex()
+            return calc == h, False
+        except Exception:
+            return False, False
+    return False, False
 
 
 class RBAC:
@@ -55,15 +83,16 @@ class RBAC:
             self.roles.setdefault(r, {'id': r, 'name': name, 'perms': sorted(ROLE_PERMS[r])})
         if not self.users:
             self.users['admin'] = self._mk_user('admin', 'admin123', 'admin', '系统管理员')
-            print('[rbac] 已创建默认管理员 admin / admin123，请登录后立即修改密码')
+            self.users['admin']['must_change_password'] = True
+            print('[rbac] 已创建默认管理员 admin / admin123（首次登录需修改密码）')
 
     def _mk_user(self, username, password, role, name=''):
-        salt = secrets.token_hex(8)
         now = time.strftime('%Y-%m-%dT%H:%M:%S')
         return {
             'id': username, 'username': username, 'name': name or username,
             'role': role if role in ROLE_NAMES else 'viewer',
-            'salt': salt, 'pwd': _hash(password, salt),
+            'pwd': _make_pwd_hash(password),
+            'must_change_password': True,
             'status': 'active', 'created_at': now, 'last_login': None,
         }
 
@@ -72,12 +101,25 @@ class RBAC:
         u = self.users.get(username)
         if not u or u.get('status') != 'active':
             return None, '用户名不存在或已禁用'
-        if u['pwd'] != _hash(password, u['salt']):
+        ok, upgrade = self._check(u, password)
+        if not ok:
             return None, '密码错误'
+        if upgrade:
+            u['pwd'] = _make_pwd_hash(password)
         token = secrets.token_hex(24)
         self.tokens[token] = {'user': username, 'expires': time.time() + self.token_ttl}
         u['last_login'] = time.strftime('%Y-%m-%dT%H:%M:%S')
         return token, None
+
+    def _check(self, u, password):
+        stored = u.get('pwd', '')
+        if stored and stored.startswith('scrypt$'):
+            return _verify_pwd(password, stored)
+        # 旧格式兼容：salt 字段仍在用户记录中（v3.4 迁移场景）
+        salt = u.get('salt', '')
+        if salt:
+            return _legacy_hash(password, salt) == stored, True
+        return False, False
 
     def logout(self, token):
         return self.tokens.pop(token, None) is not None
@@ -111,10 +153,14 @@ class RBAC:
         u = self.users.get(username)
         if not u:
             return False, '用户不存在'
-        if u['pwd'] != _hash(old, u['salt']):
+        if not new or len(new) < 8:
+            return False, '新密码至少 8 位'
+        ok, _ = self._check(u, old)
+        if not ok:
             return False, '原密码错误'
-        u['salt'] = secrets.token_hex(8)
-        u['pwd'] = _hash(new, u['salt'])
+        u.pop('salt', None)
+        u['pwd'] = _make_pwd_hash(new)
+        u['must_change_password'] = False
         return True, None
 
     def delete_user(self, username, by):

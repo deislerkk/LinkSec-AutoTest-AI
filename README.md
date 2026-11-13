@@ -225,4 +225,4 @@ sudo docker compose up -d --build
 
 ---
 
-*LinkSec·AutoTest AI v3.4.0 — 仅供合法授权渗透测试使用*
+*LinkSec·AutoTest AI v3.5.0 — 仅供合法授权渗透测试使用*

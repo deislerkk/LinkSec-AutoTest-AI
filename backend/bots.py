@@ -64,6 +64,27 @@ def build_payload(channel_type, cfg, title, message):
     raise ValueError(f'未知通道类型：{channel_type}')
 
 
+def mask_secret(value, keep_head=6, keep_tail=4):
+    """v3.5：敏感配置（webhook/token）对外掩码，防止密钥回显。"""
+    if not value:
+        return ''
+    v = str(value)
+    if len(v) <= keep_head + keep_tail:
+        return '******'
+    return v[:keep_head] + '******' + v[-keep_tail:]
+
+
+def mask_channel(channel):
+    """返回对外展示的通道对象（config 中敏感字段掩码）。"""
+    out = dict(channel)
+    cfg = dict(channel.get('config', {}))
+    for k in list(cfg.keys()):
+        if k in ('webhook', 'token', 'secret', 'chat_id', 'password'):
+            cfg[k] = mask_secret(cfg[k])
+    out['config'] = cfg
+    return out
+
+
 def send_to_channel(channel, title, message, timeout=5):
     """向单个通道发送通知，返回状态字符串。"""
     ctype = channel.get('type', 'webhook')

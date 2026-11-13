@@ -42,7 +42,7 @@ def _uid(): return str(uuid.uuid4())[:8]
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route('/api/health')
 def health():
-    return jsonify({'status':'online','version':'3.4.0','platform':'LinkSec·AutoTest AI','timestamp':_now()})
+    return jsonify({'status':'online','version':'3.5.0','platform':'LinkSec·AutoTest AI','timestamp':_now()})
 
 @app.route('/api/dashboard')
 def dashboard():
@@ -316,7 +316,9 @@ def webshell_exec(wid):
     try:
         result = subprocess.check_output(cmd, shell=True, text=True, timeout=10)
     except Exception as e:
-        result = str(e)
+        # v3.5：异常细节不外传，仅留痕审计
+        print(f'[webshell_exec] {wid} 执行异常：{e}')
+        result = '命令执行异常，详见审计日志'
     _webshells[wid]['last_used'] = _now()
     _audit('webshell_exec', f'WebShell {wid} 执行：{cmd}')
     return jsonify({'command':cmd,'result':result,'shell_id':wid})
@@ -339,9 +341,11 @@ def terminal_exec():
     except subprocess.TimeoutExpired:
         out = '命令超时'
     except subprocess.CalledProcessError as e:
-        out = e.output or str(e)
+        out = e.output or '命令执行失败'
     except Exception as e:
-        out = str(e)
+        # v3.5：异常细节不外传，仅留痕
+        print(f'[terminal_exec] 执行异常：{e}')
+        out = '命令执行异常，详见审计日志'
     _audit('terminal_exec', f'执行命令：{cmd}')
     return jsonify({'command':cmd,'output':out,'timestamp':_now()})
 
@@ -542,7 +546,9 @@ def send_notification():
                 urllib.request.urlopen(req, timeout=5)
                 n['status']='sent'
             except Exception as e:
-                n['status']=f'失败：{e}'
+                # v3.5：异常细节不外传，仅留痕
+                print(f"[notify] webhook 发送异常：{e}")
+                n['status']='发送失败'
         else:
             n['status']='无 webhook'
     else:

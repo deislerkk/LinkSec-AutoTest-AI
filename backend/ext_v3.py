@@ -90,6 +90,7 @@ def register(app, G):
     settings = scan_engine.get_settings()
     settings.setdefault('auth_enabled', True)
     settings.setdefault('approval_mode', False)
+    settings.setdefault('approval_admin_bypass', False)
     settings.setdefault('ai_mode', 'single')
 
     def auth_enabled():
@@ -113,17 +114,21 @@ def register(app, G):
             return None
         if not request.path.startswith('/api/'):
             return None
-        # 审批通过后的回放执行，直接放行
-        exec_aid = request.headers.get('X-Approval-Exec', '')
-        if exec_aid and _approvals.get(exec_aid, {}).get('status') == 'approved':
-            return None
+        # v3.5：审批回放使用一次性 exec_key（仅 approve 流程内部持有），且仅 executing 状态可执行
+        exec_key = request.headers.get('X-Approval-Exec', '')
+        if exec_key:
+            matched = any(a.get('status') == 'executing' and a.get('exec_key') == exec_key
+                          for a in _approvals.values())
+            if matched:
+                return None
         if not scan_engine.get_settings().get('approval_mode', False):
             return None
         user = getattr(request, '_user', None)
         if not user:
             return None  # 未登录由鉴权门处理
-        if user.get('role') == 'admin':
-            return None  # 管理员直接执行
+        # v3.5：admin 免审批改为可配置，默认关闭（admin 同样需审批，杜绝审批形同虚设）
+        if user.get('role') == 'admin' and scan_engine.get_settings().get('approval_admin_bypass', False):
+            return None
         for mre, pre, name in HIGH_RISK_RULES:
             if mre.match(request.method) and pre.match(request.path):
                 body = request.get_json(silent=True) or {}
@@ -149,7 +154,8 @@ def register(app, G):
         user = rbac.resolve(token)
         _audit('auth_login', f'用户 {user["username"]} 登录')
         return jsonify({'token': token, 'user': {k: user[k] for k in
-                        ('id', 'username', 'name', 'role') if k in user}})
+                        ('id', 'username', 'name', 'role') if k in user},
+                        'must_change_password': bool(user.get('must_change_password'))})
 
     @app.route('/api/auth/logout', methods=['POST'])
     def auth_logout():
@@ -203,11 +209,15 @@ def register(app, G):
             if 'status' in d:
                 u['status'] = d['status']
             if d.get('password'):
-                import hashlib, secrets
-                u['salt'] = secrets.token_hex(8)
-                u['pwd'] = hashlib.sha256((u['salt'] + d['password']).encode()).hexdigest()
+                # v3.5：统一走 scrypt 哈希
+                u.pop('salt', None)
+                u['pwd'] = rbac_mod._make_pwd_hash(d['password'])
+                u['must_change_password'] = True
             _audit('user_update', f'更新用户 {username}')
-            return jsonify(u)
+            # 不回显哈希与盐
+            return jsonify({k: u[k] for k in
+                            ('id', 'username', 'name', 'role', 'status', 'created_at', 'last_login',
+                             'must_change_password') if k in u})
         me = getattr(request, '_user', None)
         ok, err = rbac.delete_user(username, me.get('username') if me else '')
         if not ok:
@@ -323,7 +333,8 @@ def register(app, G):
 
     @app.route('/api/bots/channels', methods=['GET'])
     def list_bot_channels():
-        return jsonify(list(_bot_channels.values()))
+        # v3.5：敏感字段掩码，不回显明文密钥
+        return jsonify([bots_mod.mask_channel(c) for c in _bot_channels.values()])
 
     @app.route('/api/bots/channels', methods=['POST'])
     def create_bot_channel():
@@ -338,7 +349,7 @@ def register(app, G):
             'enabled': d.get('enabled', True), 'created_at': _now(),
         }
         _audit('bot_channel_create', f'新增机器人通道 {_bot_channels[cid]["name"]}（{ctype}）')
-        return jsonify(_bot_channels[cid]), 201
+        return jsonify(bots_mod.mask_channel(_bot_channels[cid])), 201
 
     @app.route('/api/bots/channels/<cid>', methods=['PUT', 'DELETE'])
     def bot_channel_ops(cid):
@@ -352,7 +363,7 @@ def register(app, G):
             for k in ('name', 'enabled'):
                 if k in d:
                     ch[k] = d[k]
-            return jsonify(ch)
+            return jsonify(bots_mod.mask_channel(ch))
         del _bot_channels[cid]
         _audit('bot_channel_delete', f'删除机器人通道 {ch["name"]}')
         return jsonify({'deleted': cid})
@@ -399,25 +410,34 @@ def register(app, G):
         user = getattr(request, '_user', None)
         if not user:
             return jsonify({'error': '未登录'}), 401
+        if user.get('username') == _approvals.get(aid, {}).get('requester'):
+            return jsonify({'error': '不能审批自己提交的申请（职责分离）'}), 403
         a, err = approvals.decide(aid, 'approve', user.get('username', ''))
         if not a:
             return jsonify({'error': err}), 400
         if a['status'] != 'approved':
             return jsonify({'error': err or '状态异常'}), 409
-        # 回放执行原始请求（带审批放行头）
+        # v3.5：回放执行使用一次性 exec_key，状态先置为 executing（杜绝重放窗口）
+        import secrets
+        exec_key = secrets.token_hex(16)
+        a['exec_key'] = exec_key
+        a['status'] = 'executing'
         try:
             with app.test_client() as c:
                 resp = c.open(a['path'], method=a['method'], json=a['json_body'],
                               query_string=a['query_string'],
-                              headers={'X-Approval-Exec': aid,
+                              headers={'X-Approval-Exec': exec_key,
                                        'Authorization': 'Bearer ' + (rbac_mod.extract_token() or '')})
                 result = resp.get_json(silent=True)
                 approvals.record_exec(aid, 'executed' if resp.status_code < 400 else 'failed',
                                       result, resp.status_code)
+                a.pop('exec_key', None)
                 return jsonify({'status': 'executed', 'approval': _approvals[aid]}), resp.status_code
         except Exception as e:
-            approvals.record_exec(aid, 'failed', str(e))
-            return jsonify({'error': f'执行失败：{e}'}), 500
+            a.pop('exec_key', None)
+            approvals.record_exec(aid, 'failed', '执行异常，详见审计日志')
+            print(f'[approval] 审批单 {aid} 执行异常：{e}')
+            return jsonify({'error': '执行失败，详见审计日志'}), 500
 
     @app.route('/api/approvals/<aid>/deny', methods=['POST'])
     def deny_approval(aid):
@@ -516,6 +536,65 @@ def register(app, G):
                                     note=f'编排模式 {mode}')
             result['conversation_id'] = conv_id
         _audit('ai_orchestrate', f'AI 编排（{mode}）：{goal[:60]}')
+        return jsonify(result)
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Agent 工具调用循环（v3.5：AI 通过 function calling 驱动平台工具）
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    @app.route('/api/ai/agent', methods=['POST'])
+    def ai_agent():
+        d = request.get_json(silent=True) or {}
+        goal = d.get('goal', '')
+        max_iters = min(int(d.get('max_iters', 8)), 20)
+        if not goal:
+            return jsonify({'error': '目标不能为空'}), 400
+
+        def _run_scan_sync(target, profile='quick_recon'):
+            try:
+                sid = scan_engine.create_scan(target, profile)
+                scan_engine.run_scan(sid)
+                s = scan_engine.get_scan(sid) or {}
+                n_hosts = len(s.get('hosts', []))
+                n_vulns = len(s.get('vuln_ids', []))
+                return (f'扫描 {sid} 完成：{s.get("profile_name","")}，主机 {n_hosts} 台，'
+                        f'漏洞 {n_vulns} 个，风险评分 {s.get("risk_score", 0)}/10')
+            except Exception as e:
+                return f'扫描启动异常：{type(e).__name__}'
+
+        def _get_scan(scan_id):
+            s = scan_engine.get_scan(scan_id)
+            if not s:
+                return '扫描不存在'
+            return (f'目标 {s.get("target")}，状态 {s.get("status")}，'
+                    f'主机 {len(s.get("hosts", []))} 台，漏洞 {len(s.get("vuln_ids", []))} 个，'
+                    f'风险 {s.get("risk_score", 0)}/10')
+
+        def _create_report(scan_id):
+            s = scan_engine.get_scan(scan_id)
+            if not s:
+                return '扫描不存在'
+            r = ai_analyst.generate_report(s)
+            return (r.get('report', '') or '')[:1000]
+
+        tool_executor = {
+            'nmap_scan': _run_scan_sync,
+            'list_assets': lambda: ('资产台账：' + ', '.join(
+                f'{a["type"]}:{a["value"]}(覆盖{a["scan_count"]}次/漏洞{len(a.get("vuln_ids", []))}个)'
+                for a in list(_assets.values())[:10]) or '空'),
+            'get_scan': _get_scan,
+            'create_report': _create_report,
+        }
+        result = ai_analyst.agent_run(goal, tool_executor, max_iters=max_iters)
+        # Token 计入单次对话
+        if result.get('usage'):
+            u = result['usage']
+            conv_id = d.get('conversation_id') or f'conv_{_uid()}'
+            token_mod.LEDGER.record('conversation', conv_id, goal[:40],
+                                    result.get('model', 'unknown'),
+                                    u.get('prompt_tokens', 0), u.get('completion_tokens', 0),
+                                    note='Agent 工具调用循环')
+            result['conversation_id'] = conv_id
+        _audit('ai_agent', f'Agent 执行：{goal[:60]}（{len(result.get("tool_calls", []))} 次工具调用）')
         return jsonify(result)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

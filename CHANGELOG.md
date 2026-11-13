@@ -18,6 +18,15 @@
 
 ## 迭代记录
 
+### v3.5.0（2026-11-13）· 完整迭代 🚀
+
+- 变更范围：后端 + 前端 + 文档（安全整改）
+- 内容：
+  1. **P0 安全整改**：审批重放窗口关闭（一次性 exec_key + executing 状态机）、职责分离（不可自审）、admin 免审批改为可配置且默认关闭；密码哈希升级 scrypt（16 字节盐，旧哈希登录自动升级）；默认口令首次登录强制改密；webhook 密钥 API 掩码回显；终端/WebShell/通知异常信息收敛（仅审计留痕）
+  2. **P1 Agent 工具调用循环**：新增 `POST /api/ai/agent`——Claude function calling（tools 协议）真实驱动扫描引擎（nmap_scan/list_assets/get_scan/create_report），模拟模式亦真实调用工具；前端新增「Agent 工具调用」面板（调用轨迹+结论+Token）；「多智能体编排」措辞修正为「多模式 AI 编排」
+  3. 整改复查文档：`docs/security-remediation.md`（核验结论 + 整改记录 + P2/P3 待办清单）
+- 说明：政府域名拦截（tool_guard）维持不实现（项目方决策，风险自担，见整改文档）
+
 ### v3.4.0-UI2（2026-11-13）· 纯 UI 迭代 🎨
 
 - 变更范围：前端界面（logo 与 favicon 替换，不涉及后端接口与部署）

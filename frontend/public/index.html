@@ -238,7 +238,7 @@ body{background:var(--bg0);color:var(--text1);font-family:var(--font-mono);font-
   <div class="logo">
     <div class="logo-icon"><img src="/logo.png" alt="LinkSec"></div>
     <div class="logo-text">LinkSec·<span>AutoTest AI</span></div>
-    <div class="logo-badge">v3.4.0</div>
+    <div class="logo-badge">v3.5.0</div>
   </div>
   <div class="topbar-right">
     <div class="status-dot" id="statusDot"></div>
@@ -369,6 +369,29 @@ async function doLogin() {
   document.getElementById('loginErr').textContent = '';
   hideLogin();
   toast(`欢迎，${d.user?.name || d.user?.username}（${d.user?.role}）`, 'ok');
+  // v3.5：首次登录/管理员重置后强制修改密码
+  if (d.must_change_password) { showChangePwd(true); return; }
+  await refresh(); render();
+}
+
+function showChangePwd(forced = false) {
+  openModal('修改密码', `
+    ${forced ? '<div style="font-size:11px;color:var(--warn);margin-bottom:10px">为安全起见，首次登录必须先修改默认密码（至少 8 位）</div>' : ''}
+    <div class="form-group"><label class="form-label">原密码</label><input class="form-input" id="cpOld" type="password"></div>
+    <div class="form-group"><label class="form-label">新密码（至少 8 位）</label><input class="form-input" id="cpNew" type="password"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      ${forced ? '' : '<button class="btn" onclick="closeModal()">取消</button>'}
+      <button class="btn btn-primary" onclick="doChangePwd()">确认修改</button>
+    </div>`);
+}
+
+async function doChangePwd() {
+  const oldP = document.getElementById('cpOld').value;
+  const newP = document.getElementById('cpNew').value;
+  const d = await api('/auth/password', {method:'PUT', body: JSON.stringify({old_password: oldP, new_password: newP})});
+  if (!d?.status) { toast(d?.error || '修改失败','err'); return; }
+  toast('密码已修改','ok');
+  closeModal();
   await refresh(); render();
 }
 async function doLogout() {
@@ -1329,7 +1352,7 @@ async function createTask() {
 /* ── AI 分析 ─────────────────────────────────────────────────────────────── */
 function pgAI(initPrompt='') {
   document.getElementById('mainArea').innerHTML=`
-  <div class="page-header"><div><div class="page-title">AI 分析</div><div class="page-subtitle">LinkSec AI 智能漏洞分析与攻击链推理 · 多智能体编排</div></div></div>
+  <div class="page-header"><div><div class="page-title">AI 分析</div><div class="page-subtitle">AI 漏洞分析与攻击链推理 · 多模式编排 · Agent 工具调用</div></div></div>
   <div class="content" style="padding-bottom:40px">
     <div class="two-col">
       <div class="panel">
@@ -1355,7 +1378,7 @@ function pgAI(initPrompt='') {
       </div>
     </div>
     <div class="panel" style="margin-top:14px">
-      <div class="panel-header"><div class="panel-title"><i class="ti ti-affiliate" style="font-size:13px;color:var(--accent2)"></i>多智能体编排（Pi Orchestration）</div></div>
+      <div class="panel-header"><div class="panel-title"><i class="ti ti-affiliate" style="font-size:13px;color:var(--accent2)"></i>多模式 AI 编排</div></div>
       <div style="padding:14px 16px">
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
           ${[['single','单智能体','直接分析'],['deep','深度模式','分析+自省复核'],['plan-execute','计划-执行','先规划后分阶段执行'],['supervisor','监督模式','多专家并行+汇总']].map(([m,cn,desc])=>`
@@ -1370,8 +1393,47 @@ function pgAI(initPrompt='') {
         <div id="orchUsage" style="margin-top:8px"></div>
       </div>
     </div>
+    <div class="panel" style="margin-top:14px">
+      <div class="panel-header"><div class="panel-title"><i class="ti ti-robot" style="font-size:13px;color:var(--accent)"></i>Agent 工具调用（v3.5 · POST /api/ai/agent）</div>
+        <span style="font-size:9px;color:var(--text3)">AI 通过 function calling 真实驱动扫描引擎</span></div>
+      <div style="padding:14px 16px">
+        <textarea id="agentGoal" class="form-textarea" style="min-height:60px" placeholder="Agent 目标，如：扫描 192.168.10.0/24 并评估风险"></textarea>
+        <div style="margin-top:10px"><button class="btn btn-primary" onclick="runAgent()"><i class="ti ti-robot"></i>启动 Agent</button></div>
+        <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1.4fr;gap:12px">
+          <div>
+            <div style="font-size:10px;color:var(--text3);letter-spacing:.5px;margin-bottom:6px">工具调用轨迹</div>
+            <div class="terminal" id="agentTrace" style="min-height:140px;max-height:260px;overflow-y:auto;font-size:11px"><span class="t-dim">等待执行…</span></div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);letter-spacing:.5px;margin-bottom:6px">分析结论</div>
+            <div class="ai-message" id="agentResult" style="min-height:140px;white-space:pre-wrap">Agent 结论将在此展示…</div>
+          </div>
+        </div>
+        <div id="agentUsage" style="margin-top:8px"></div>
+      </div>
+    </div>
   </div>`;
   if(initPrompt) setTimeout(runAI, 200);
+}
+
+async function runAgent() {
+  const goal = document.getElementById('agentGoal')?.value?.trim();
+  if (!goal) { toast('请输入 Agent 目标','err'); return; }
+  const trace = document.getElementById('agentTrace');
+  const res = document.getElementById('agentResult');
+  if (trace) trace.innerHTML = '<span class="t-dim">Agent 运行中…</span>';
+  if (res) res.textContent = 'Agent 运行中…';
+  const d = await api('/ai/agent', {method:'POST', body: JSON.stringify({goal, conversation_id: AI_CONV_ID})});
+  if (!d) { if (res) res.textContent = 'Agent 执行失败'; return; }
+  if (res) res.textContent = d.analysis || d.error || JSON.stringify(d);
+  if (trace) {
+    const calls = d.tool_calls || [];
+    trace.innerHTML = calls.length ? calls.map(c=>`<div><span class="t-prompt">▶ ${c.tool}</span> <span class="t-dim">${JSON.stringify(c.params)}</span><div class="t-dim" style="padding-left:14px">↳ ${String(c.result||'').slice(0,90)}${String(c.result||'').length>90?'…':''}</div></div>`).join('')
+      + `<div style="color:#58a6ff;margin-top:4px">—— ${d.iterations} 次迭代，${calls.length} 次工具调用 ——</div>`
+      : '<span class="t-dim">无工具调用记录</span>';
+  }
+  const ue = document.getElementById('agentUsage');
+  if (ue) ue.innerHTML = tokenBadge(d?.usage);
 }
 
 let ORCH_MODE = 'single';
@@ -1569,8 +1631,13 @@ function pgSettings() {
         </div>
         <div class="item-card" style="flex:1;min-width:220px">
           <div style="font-weight:700;font-size:12px;margin-bottom:6px">人机协同审批（approval_mode）</div>
-          <div style="font-size:10px;color:var(--text3);margin-bottom:8px">开启后非管理员执行 C2/WebShell/终端等高危操作需审批</div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:8px">开启后执行 C2/WebShell/终端等高危操作需审批（v3.5 默认 admin 同样受审）</div>
           <button class="btn btn-sm btn-primary" id="btnApproval" onclick="toggleGov('approval_mode')">加载中…</button>
+        </div>
+        <div class="item-card" style="flex:1;min-width:220px">
+          <div style="font-weight:700;font-size:12px;margin-bottom:6px">admin 免审批（approval_admin_bypass）</div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:8px">默认关闭；开启后管理员执行高危操作免审批</div>
+          <button class="btn btn-sm btn-primary" id="btnAdminBypass" onclick="toggleGov('approval_admin_bypass')">加载中…</button>
         </div>
         <div class="item-card" style="flex:1;min-width:220px">
           <div style="font-weight:700;font-size:12px;margin-bottom:6px">SQLite 持久化</div>
@@ -1582,7 +1649,7 @@ function pgSettings() {
     <div class="panel" style="margin-top:14px">
       <div class="panel-header"><div class="panel-title"><i class="ti ti-info-circle" style="font-size:13px"></i>平台信息</div></div>
       <div style="padding:16px;display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
-        ${[['平台名称','LinkSec·AutoTest AI'],['版本','v3.4.0'],['后端','Flask + Python'],['AI 模型','claude-sonnet-4'],['扫描引擎','Kali 工具链']].map(([l,v])=>`
+        ${[['平台名称','LinkSec·AutoTest AI'],['版本','v3.5.0'],['后端','Flask + Python'],['AI 模型','claude-sonnet-4'],['扫描引擎','Kali 工具链']].map(([l,v])=>`
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
           <div style="font-size:9px;color:var(--text3);margin-bottom:3px;text-transform:uppercase">${l}</div>
           <div style="font-size:11px;color:var(--text1);font-weight:600">${v}</div>
@@ -1609,6 +1676,7 @@ async function loadGovSettings() {
   const on = v => v ? '已开启 ✓' : '已关闭';
   const ba = document.getElementById('btnAuth'); if (ba) ba.textContent = on(s.auth_enabled);
   const bp = document.getElementById('btnApproval'); if (bp) bp.textContent = on(s.approval_mode);
+  const ab = document.getElementById('btnAdminBypass'); if (ab) ab.textContent = on(s.approval_admin_bypass);
   const si = document.getElementById('storageInfo');
   const st = await api('/storage/info');
   if (si && st) si.innerHTML = `DB：<code style="color:var(--accent);font-size:9px">${st.db_path}</code>`;
