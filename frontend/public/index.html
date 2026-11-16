@@ -75,7 +75,7 @@ body{background:var(--bg0);color:var(--text1);font-family:var(--font-mono);font-
 /* CONTENT */
 .content{padding:18px 24px}
 /* STAT GRID */
-.stat-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:18px}
+.stat-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:18px}
 .stat-card{background:var(--bg1);border:1px solid var(--border);border-radius:8px;padding:13px 15px;position:relative;overflow:hidden}
 .stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
 .sc-red::before{background:var(--danger)}.sc-orange::before{background:var(--accent3)}.sc-blue::before{background:var(--accent2)}.sc-teal::before{background:var(--accent)}.sc-purple::before{background:var(--accent4)}.sc-green::before{background:var(--success)}
@@ -239,7 +239,7 @@ body{background:var(--bg0);color:var(--text1);font-family:var(--font-mono);font-
   <div class="logo">
     <div class="logo-icon"><img src="/logo.png" alt="LinkSec"></div>
     <div class="logo-text">LinkSec·<span>AutoTest AI</span></div>
-    <div class="logo-badge">v3.6.0</div>
+    <div class="logo-badge">v3.6.0-UI2</div>
   </div>
   <div class="topbar-right">
     <div class="status-dot" id="statusDot"></div>
@@ -310,6 +310,7 @@ body{background:var(--bg0);color:var(--text1);font-family:var(--font-mono);font-
   <div class="bb-item"><i class="ti ti-shield" style="font-size:11px"></i>漏洞：<span id="bbVulns">—</span></div>
   <div class="bb-item"><i class="ti ti-satellite" style="font-size:11px"></i>C2：<span id="bbC2">—</span></div>
   <div class="bb-item"><i class="ti ti-radar" style="font-size:11px"></i>扫描：<span id="bbScans">—</span></div>
+  <div class="bb-item"><i class="ti ti-package" style="font-size:11px"></i>组件：<span id="bbComponents">—</span></div>
   <div style="margin-left:auto;color:var(--accent3)" id="clock"></div>
 </div>
 
@@ -437,11 +438,11 @@ async function checkHealth() {
 
 /* ── 数据刷新 ─────────────────────────────────────────────────────────────── */
 async function refresh() {
-  const [dash,vulns,scans,projects,c2,ws,tasks,chains,knowledge,skills,auditResp,notifs] = await Promise.all([
+  const [dash,vulns,scans,projects,c2,ws,tasks,chains,knowledge,skills,auditResp,notifs,compStats] = await Promise.all([
     api('/dashboard'), api('/vulnerabilities?per_page=100'), api('/scans'),
     api('/projects'), api('/c2/sessions'), api('/webshells'), api('/tasks'),
     api('/chains'), api('/knowledge'), api('/skills'),
-    api('/audit?per_page=100'), api('/notifications'),
+    api('/audit?per_page=100'), api('/notifications'), api('/components/stats'),
   ]);
   if(dash)      ST.dashboard=dash;
   if(vulns)     ST.vulns=vulns.data||[];
@@ -455,6 +456,7 @@ async function refresh() {
   if(skills)    ST.skills=skills;
   if(auditResp) ST.audit=auditResp.data||[];
   if(notifs)    ST.notifications=notifs;
+  if(compStats) ST.compStats=compStats;
 
   const bs=ST.dashboard.by_severity||{};
   const running=(ST.scans||[]).filter(s=>s.status==='running').length;
@@ -470,6 +472,9 @@ async function refresh() {
   document.getElementById('badgeTasks').textContent=pending;
   document.getElementById('badgeHistory').textContent=(ST.scans||[]).filter(s=>s.status==='completed').length;
   document.getElementById('badgeKnowledge').textContent=(ST.knowledge||[]).length;
+  const nComp=(ST.compStats||{}).total||0;
+  const bbComp=document.getElementById('badgeComponents'); if(bbComp) bbComp.textContent=nComp;
+  const bbCompBar=document.getElementById('bbComponents'); if(bbCompBar) bbCompBar.textContent=`${nComp}个`;
   document.getElementById('bbVulns').textContent=`${ST.vulns.length}个`;
   document.getElementById('bbC2').textContent=`${aliveC2}个活跃`;
   document.getElementById('bbScans').textContent=`${running}进行中`;
@@ -539,6 +544,7 @@ function pgDashboard() {
       <div class="stat-card sc-blue"><div class="stat-label">扫描任务</div><div class="stat-value" style="color:var(--accent2)">${d.total_scans||0}</div><div class="stat-sub up">${d.running_scans||0} 进行中</div></div>
       <div class="stat-card sc-teal"><div class="stat-label">C2 会话</div><div class="stat-value" style="color:var(--accent)">${d.c2_sessions||0}</div><div class="stat-sub">活跃 Beacon</div></div>
       <div class="stat-card sc-purple"><div class="stat-label">项目</div><div class="stat-value" style="color:var(--accent4)">${d.projects||0}</div><div class="stat-sub">${d.webshells||0} 个WebShell</div></div>
+      <div class="stat-card sc-blue" style="border-color:rgba(124,58,237,.35)"><div class="stat-label">组件</div><div class="stat-value" style="color:var(--accent4)">${(ST.compStats||{}).total||0}</div><div class="stat-sub">${(ST.compStats||{}).hosts_covered||0} 个主机实例</div></div>
     </div>
     <div class="three-col-auto">
       <div class="panel">
@@ -1651,7 +1657,7 @@ function pgSettings() {
     <div class="panel" style="margin-top:14px">
       <div class="panel-header"><div class="panel-title"><i class="ti ti-info-circle" style="font-size:13px"></i>平台信息</div></div>
       <div style="padding:16px;display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
-        ${[['平台名称','LinkSec·AutoTest AI'],['版本','v3.6.0'],['后端','Flask + Python'],['AI 模型','claude-sonnet-4'],['扫描引擎','Kali 工具链']].map(([l,v])=>`
+        ${[['平台名称','LinkSec·AutoTest AI'],['版本','v3.6.0-UI2（UI）'],['后端','Flask + Python'],['AI 模型','claude-sonnet-4'],['扫描引擎','Kali 工具链']].map(([l,v])=>`
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
           <div style="font-size:9px;color:var(--text3);margin-bottom:3px;text-transform:uppercase">${l}</div>
           <div style="font-size:11px;color:var(--text1);font-weight:600">${v}</div>
