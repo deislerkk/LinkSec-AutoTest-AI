@@ -230,6 +230,8 @@ body{background:var(--bg0);color:var(--text1);font-family:var(--font-mono);font-
 .boot-btn:hover{background:#175035;color:#eafff5}
 .boot-welcome{font-size:28px;letter-spacing:8px;color:#eafff5;font-weight:700;animation:hexPulse 1.8s ease-in-out infinite}
 .boot-err{color:#ff8f8f;font-size:11.5px;margin-top:8px;min-height:16px}
+.boot-sound{position:absolute;top:18px;right:20px;background:rgba(14,30,24,.7);border:1px solid #24523c;color:#9fe8c8;font-size:15px;padding:7px 10px;border-radius:6px;cursor:pointer;z-index:1}
+.boot-sound:hover{border-color:#5ef0ae}
 </style>
 </head>
 <body>
@@ -249,6 +251,7 @@ body{background:var(--bg0);color:var(--text1);font-family:var(--font-mono);font-
 
 <!-- BOOT 开机/身份验证层（v3.6.0-UI3 莱茵风）-->
 <div id="bootOverlay" style="display:flex">
+  <button class="boot-sound" id="bootSoundBtn" onclick="toggleSound(event)">🔊</button>
   <div class="boot-core" id="bootCore"></div>
 </div>
 
@@ -258,7 +261,7 @@ body{background:var(--bg0);color:var(--text1);font-family:var(--font-mono);font-
   <div class="logo">
     <div class="logo-icon"><img src="/logo.png" alt="LinkSec"></div>
     <div class="logo-text">LinkSec·<span>AutoTest AI</span></div>
-    <div class="logo-badge">v3.6.0-UI3</div>
+    <div class="logo-badge">v3.6.0-UI4</div>
   </div>
   <div class="topbar-right">
     <div class="status-dot" id="statusDot"></div>
@@ -371,33 +374,68 @@ function toast(msg, type='info', dur=3000) {
 function showLogin() { bootStart(); }
 
 /* ═══ 莱茵风开机/身份验证层（v3.6.0-UI3）═══ */
+/* ═══ 开机音效（Web Audio 全合成，无外部音频文件）═══ */
+const Sfx={ ctx:null, enabled:true,
+  ensure(){
+    if(!this.ctx){ try{ this.ctx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+    if(this.ctx && this.ctx.state==='suspended'){ this.ctx.resume().catch(()=>{}); }
+  },
+  tone(freq,dur,type,gain,when){
+    if(!this.enabled||!this.ctx||this.ctx.state!=='running') return;
+    const t=this.ctx.currentTime+(when||0);
+    const o=this.ctx.createOscillator(), g=this.ctx.createGain();
+    o.type=type||'square'; o.frequency.value=freq;
+    g.gain.setValueAtTime(gain||0.05,t);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(this.ctx.destination);
+    o.start(t); o.stop(t+dur+0.02);
+  },
+  tick(){ this.tone(1500+Math.random()*700,0.03,'square',0.02); },
+  lineOk(){ this.tone(660,0.06,'triangle',0.05); this.tone(880,0.08,'triangle',0.045,0.06); },
+  confirm(){ this.tone(520,0.07,'square',0.05); this.tone(780,0.08,'square',0.045,0.07); },
+  success(){ [523,659,784].forEach((f,i)=>this.tone(f,0.13,'triangle',0.06,i*0.09)); },
+  granted(){ this.tone(196,0.55,'sine',0.09); this.tone(392,0.42,'triangle',0.05,0.12); this.tone(784,0.32,'triangle',0.05,0.26); },
+  error(){ this.tone(140,0.2,'sawtooth',0.05); },
+};
+function toggleSound(ev){ if(ev) ev.stopPropagation(); Sfx.enabled=!Sfx.enabled; const b=document.getElementById('bootSoundBtn'); if(b) b.textContent=Sfx.enabled?'🔊':'🔇'; if(Sfx.enabled){ Sfx.ensure(); Sfx.confirm(); } }
+
 const BOOT_LINES=['LINK SECURITY SYSTEMS','内核自检 .................... OK','安全模块初始化 ................ OK','工具链状态检测 ................ OK','身份验证服务就绪 .............. OK'];
 let BOOT_STEP=0; let BOOT_AFTER=null;
 function hexSVG(s,label){
   return `<svg class="boot-hex" viewBox="0 0 100 100" style="width:${s}px;height:${s}px"><polygon points="50,4 92,27 92,73 50,96 8,73 8,27" fill="none" stroke="#5ef0ae" stroke-width="3"/><polygon points="50,12 84,30 84,70 50,88 16,70 16,30" fill="rgba(94,240,174,.06)" stroke="rgba(94,240,174,.35)" stroke-width="1"/><text x="50" y="59" text-anchor="middle" font-size="22" fill="#5ef0ae" font-family="Consolas,monospace" font-weight="bold">${label}</text></svg>`;
 }
+let BOOT_STARTED=false;
 function bootStart(){
-  BOOT_STEP=0; BOOT_AFTER=null;
+  BOOT_STEP=0; BOOT_AFTER=null; BOOT_STARTED=false;
   const el=document.getElementById('bootOverlay'); if(!el) return;
   el.classList.remove('exit'); el.style.display='flex';
   const core=document.getElementById('bootCore');
   core.innerHTML=`${hexSVG(92,'LS')}
   <div class="boot-title">LINK·SEC</div>
-  <div class="boot-sub">AUTOTEST AI · 身份验证协议 V3.6.0</div>
-  <div class="boot-lines" id="bootLines"></div>
-  <div class="boot-bar" id="bootBar">${'<i></i>'.repeat(28)}</div>`;
+  <div class="boot-sub">AUTOTEST AI · 身份验证协议 V3.6.0 · UI4</div>
+  <div class="boot-lines" id="bootLines"><div class="boot-line" style="color:#5ef0ae">▶ 点击或按 ENTER 启动 <span class="boot-cursor"></span></div></div>
+  <div class="boot-bar" id="bootBar">${'<i></i>'.repeat(28)}</div>
+  <div class="boot-sub" style="color:#4d7563">启动后启用音效（右上角可静音）</div>`;
+  document.onkeydown=bootKey;
+  el.onclick=()=>{ if(!BOOT_STARTED && BOOT_STEP===0) bootGo(); };
+}
+function bootGo(){
+  if(BOOT_STARTED) return;
+  BOOT_STARTED=true;
+  Sfx.ensure(); Sfx.confirm();
   const linesEl=document.getElementById('bootLines');
   const total=BOOT_LINES.join('').length;
   let li=0,ch=0;
   const timer=setInterval(()=>{
-    if(li>=BOOT_LINES.length){ clearInterval(timer); setTimeout(bootVerify,300); return; }
+    if(li>=BOOT_LINES.length){ clearInterval(timer); Sfx.success(); setTimeout(bootVerify,300); return; }
+    if(ch>0 && ch<BOOT_LINES[li].length && ch%2===0) Sfx.tick();
     linesEl.innerHTML=BOOT_LINES.slice(0,li).map(l=>`<div class="ok">${l}</div>`).join('')
       +`<div>${BOOT_LINES[li].slice(0,ch)}<span class="boot-cursor"></span></div>`;
     const progress=BOOT_LINES.slice(0,li).join('').length+ch;
     const on=Math.round(progress/total*28);
     [...document.getElementById('bootBar').children].forEach((b,i)=>{ b.className=(on>i)?'on':''; });
     ch+=2;
-    if(ch>BOOT_LINES[li].length+8){ li++; ch=0; }
+    if(ch>BOOT_LINES[li].length+8){ Sfx.lineOk(); li++; ch=0; }
   },40);
 }
 function bootVerify(){
@@ -431,6 +469,7 @@ function setStepActive(){
 }
 function bootKey(e){
   if(e.key!=='Enter') return;
+  if(BOOT_STEP===0){ bootGo(); return; }
   if(BOOT_STEP<=2) advance(BOOT_STEP);
   else if(BOOT_STEP===3) bootSubmit();
 }
@@ -443,6 +482,8 @@ async function advance(n){
     body.innerHTML='<div class="boot-line dim">正在连接 /api/health …</div>';
     body.innerHTML=await bootHealth();
   } else { return; }
+  Sfx.confirm();
+  if(BOOT_STEP===2) Sfx.success();
   BOOT_STEP++;
   if(BOOT_STEP===3){ body.innerHTML+=bootLoginForm(); }
   setStepActive();
@@ -473,7 +514,7 @@ async function bootSubmit(){
   const err=document.getElementById('bootErr'); if(err) err.textContent='验证中…';
   const r=await fetch(API+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});
   const d=await r.json().catch(()=>null);
-  if(!r.ok||!d?.token){ if(err) err.textContent='验证失败：'+((d&&d.error)||'凭证错误'); return; }
+  if(!r.ok||!d?.token){ Sfx.error(); if(err) err.textContent='验证失败：'+((d&&d.error)||'凭证错误'); return; }
   AUTH_TOKEN=d.token; AUTH_USER=d.user;
   localStorage.setItem('linksec_token',d.token);
   if(err) err.textContent='';
@@ -489,6 +530,7 @@ function bootWelcome(who, role){
   <div class="boot-welcome">ACCESS GRANTED</div>
   <div class="boot-sub" style="margin-top:10px">欢迎，${who}（${role}）· 会话令牌已签发</div>
   <div class="boot-bar" style="margin-top:18px">${'<i class="on"></i>'.repeat(28)}</div>`;
+  Sfx.granted();
   setTimeout(bootExit,1600);
 }
 function bootExit(){
@@ -1779,7 +1821,7 @@ function pgSettings() {
     <div class="panel" style="margin-top:14px">
       <div class="panel-header"><div class="panel-title"><i class="ti ti-info-circle" style="font-size:13px"></i>平台信息</div></div>
       <div style="padding:16px;display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
-        ${[['平台名称','LinkSec·AutoTest AI'],['版本','v3.6.0-UI3（UI）'],['后端','Flask + Python'],['AI 模型','claude-sonnet-4'],['扫描引擎','Kali 工具链']].map(([l,v])=>`
+        ${[['平台名称','LinkSec·AutoTest AI'],['版本','v3.6.0-UI4（UI）'],['后端','Flask + Python'],['AI 模型','claude-sonnet-4'],['扫描引擎','Kali 工具链']].map(([l,v])=>`
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
           <div style="font-size:9px;color:var(--text3);margin-bottom:3px;text-transform:uppercase">${l}</div>
           <div style="font-size:11px;color:var(--text1);font-weight:600">${v}</div>
