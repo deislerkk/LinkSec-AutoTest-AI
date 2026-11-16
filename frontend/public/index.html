@@ -202,8 +202,11 @@ body{background:var(--bg0);color:var(--text1);font-family:var(--font-mono);font-
 .item-card-meta{font-size:10px;color:var(--text3);display:flex;gap:14px;align-items:center}
 
 /* ═══ 莱茵风开机/身份验证层（v3.6.0-UI3）═══ */
-#bootOverlay{position:fixed;inset:0;background:#04070b;z-index:10000;display:flex;align-items:center;justify-content:center;font-family:"Consolas","JetBrains Mono",monospace;color:#9fe8c8;overflow:hidden;transition:opacity .65s ease,transform .65s ease}
-#bootOverlay::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(255,255,255,.028) 0 1px,transparent 1px 3px);pointer-events:none}
+#bootOverlay{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 38%,#0a2218 0%,#06120d 55%,#03060a 100%);z-index:10000;display:flex;align-items:center;justify-content:center;font-family:"Consolas","JetBrains Mono",monospace;color:#9fe8c8;overflow:hidden;transition:opacity .65s ease,transform .65s ease}
+#bootGrid{position:absolute;inset:0;background-image:linear-gradient(rgba(94,240,174,.065) 1px,transparent 1px),linear-gradient(90deg,rgba(94,240,174,.065) 1px,transparent 1px);background-size:34px 34px;pointer-events:none;-webkit-mask-image:radial-gradient(ellipse at 50% 40%,#000 25%,transparent 78%);mask-image:radial-gradient(ellipse at 50% 40%,#000 25%,transparent 78%);animation:gridGlow 6s ease-in-out infinite}
+@keyframes gridGlow{0%,100%{opacity:.75}50%{opacity:1}}
+#bootParticles{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+#bootOverlay::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(255,255,255,.018) 0 1px,transparent 1px 3px);pointer-events:none;z-index:2}
 #bootOverlay.exit{opacity:0;transform:translateY(-4%)}
 .boot-core{position:relative;max-width:660px;width:92%;text-align:center}
 .boot-hex{display:block;margin:0 auto 16px;filter:drop-shadow(0 0 16px rgba(94,240,174,.35));animation:hexPulse 2.6s ease-in-out infinite}
@@ -251,6 +254,8 @@ body{background:var(--bg0);color:var(--text1);font-family:var(--font-mono);font-
 
 <!-- BOOT 开机/身份验证层（v3.6.0-UI3 莱茵风）-->
 <div id="bootOverlay" style="display:flex">
+  <div id="bootGrid"></div>
+  <canvas id="bootParticles"></canvas>
   <button class="boot-sound" id="bootSoundBtn" onclick="toggleSound(event)">🔊</button>
   <div class="boot-core" id="bootCore"></div>
 </div>
@@ -261,7 +266,7 @@ body{background:var(--bg0);color:var(--text1);font-family:var(--font-mono);font-
   <div class="logo">
     <div class="logo-icon"><img src="/logo.png" alt="LinkSec"></div>
     <div class="logo-text">LinkSec·<span>AutoTest AI</span></div>
-    <div class="logo-badge">v3.6.0-UI4</div>
+    <div class="logo-badge">v3.6.0-UI5</div>
   </div>
   <div class="topbar-right">
     <div class="status-dot" id="statusDot"></div>
@@ -374,6 +379,39 @@ function toast(msg, type='info', dur=3000) {
 function showLogin() { bootStart(); }
 
 /* ═══ 莱茵风开机/身份验证层（v3.6.0-UI3）═══ */
+/* ═══ 开机粒子数据流（canvas 自绘，无外部素材）═══ */
+function bootParticles(){
+  const cv=document.getElementById('bootParticles'); if(!cv) return;
+  const ctx=cv.getContext('2d');
+  let W,H;
+  const ps=[];
+  function resize(){
+    W=cv.width=Math.max(1,Math.floor(cv.offsetWidth*(window.devicePixelRatio||1)));
+    H=cv.height=Math.max(1,Math.floor(cv.offsetHeight*(window.devicePixelRatio||1)));
+  }
+  resize(); window.addEventListener('resize',resize);
+  for(let i=0;i<70;i++){
+    ps.push({x:Math.random(),y:Math.random(),r:Math.random()*1.6+0.4,
+             s:Math.random()*0.00035+0.0001,a:Math.random()*0.45+0.12,
+             drift:(Math.random()-0.5)*0.00012});
+  }
+  (function loop(){
+    ctx.clearRect(0,0,W,H);
+    const dpr=window.devicePixelRatio||1;
+    ps.forEach(p=>{
+      p.y-=p.s; p.x+=p.drift;
+      if(p.y<0){ p.y=1; p.x=Math.random(); }
+      if(p.x>1) p.x=0; if(p.x<0) p.x=1;
+      ctx.beginPath();
+      ctx.fillStyle='rgba(94,240,174,'+p.a.toFixed(3)+')';
+      ctx.arc(p.x*W,p.y*H,p.r*dpr,0,6.29);
+      ctx.fill();
+    });
+    requestAnimationFrame(loop);
+  })();
+}
+bootParticles();
+
 /* ═══ 开机音效（Web Audio 全合成，无外部音频文件）═══ */
 const Sfx={ ctx:null, enabled:true,
   ensure(){
@@ -412,7 +450,7 @@ function bootStart(){
   const core=document.getElementById('bootCore');
   core.innerHTML=`${hexSVG(92,'LS')}
   <div class="boot-title">LINK·SEC</div>
-  <div class="boot-sub">AUTOTEST AI · 身份验证协议 V3.6.0 · UI4</div>
+  <div class="boot-sub">AUTOTEST AI · 身份验证协议 V3.6.0 · UI5</div>
   <div class="boot-lines" id="bootLines"><div class="boot-line" style="color:#5ef0ae">▶ 点击或按 ENTER 启动 <span class="boot-cursor"></span></div></div>
   <div class="boot-bar" id="bootBar">${'<i></i>'.repeat(28)}</div>
   <div class="boot-sub" style="color:#4d7563">启动后启用音效（右上角可静音）</div>`;
@@ -1821,7 +1859,7 @@ function pgSettings() {
     <div class="panel" style="margin-top:14px">
       <div class="panel-header"><div class="panel-title"><i class="ti ti-info-circle" style="font-size:13px"></i>平台信息</div></div>
       <div style="padding:16px;display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
-        ${[['平台名称','LinkSec·AutoTest AI'],['版本','v3.6.0-UI4（UI）'],['后端','Flask + Python'],['AI 模型','claude-sonnet-4'],['扫描引擎','Kali 工具链']].map(([l,v])=>`
+        ${[['平台名称','LinkSec·AutoTest AI'],['版本','v3.6.0-UI5（UI）'],['后端','Flask + Python'],['AI 模型','claude-sonnet-4'],['扫描引擎','Kali 工具链']].map(([l,v])=>`
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
           <div style="font-size:9px;color:var(--text3);margin-bottom:3px;text-transform:uppercase">${l}</div>
           <div style="font-size:11px;color:var(--text1);font-weight:600">${v}</div>
