@@ -42,7 +42,7 @@ def _uid(): return str(uuid.uuid4())[:8]
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route('/api/health')
 def health():
-    return jsonify({'status':'online','version':'3.5.0','platform':'LinkSec·AutoTest AI','timestamp':_now()})
+    return jsonify({'status':'online','version':'3.6.0','platform':'LinkSec·AutoTest AI','timestamp':_now()})
 
 @app.route('/api/dashboard')
 def dashboard():
@@ -71,7 +71,17 @@ def create_scan():
     target, profile = d.get('target','').strip(), d.get('profile','full_pentest')
     if not target: return jsonify({'error':'目标不能为空'}),400
     sid = scan_engine.create_scan(target, profile)
-    threading.Thread(target=scan_engine.run_scan, args=(sid,), daemon=True).start()
+    # v3.6：扫描完成后自动从服务指纹提取组件（资产 → 组件 层）
+    def run_and_extract():
+        scan_engine.run_scan(sid)
+        try:
+            if hasattr(app, 'ext_v3'):
+                created, updated = app.ext_v3['components'].extract_by_scan_id(
+                    scan_engine.get_scan, sid)[0] or (0, 0)
+                _audit('component_extract', f'扫描 {sid} 自动提取组件：新增 {created}，更新 {updated}')
+        except Exception as e:
+            print(f'[component_extract] 自动提取异常：{e}')
+    threading.Thread(target=run_and_extract, daemon=True).start()
     _audit('scan_create', f'创建扫描任务 {sid}，目标 {target}')
     # v3.3：自动匹配资产扫描覆盖
     try:

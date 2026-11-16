@@ -26,6 +26,7 @@ import assets as assets_mod
 import approvals as approvals_mod
 import bots as bots_mod
 import token_usage as token_mod
+import components as comp_mod
 
 # 高危操作（需审批）：method + 正则路径 → 展示名
 HIGH_RISK_RULES = (
@@ -67,6 +68,7 @@ def register(app, G):
     _assets = {}
     _approvals = {}
     _bot_channels = {}
+    _components = {}
 
     # ── SQLite 持久化 ───────────────────────────────────────────────────────
     storage = storage_mod.Storage()
@@ -83,6 +85,7 @@ def register(app, G):
     storage.register('approvals', _approvals)
     storage.register('bot_channels', _bot_channels)
     storage.register('token_records', token_mod.LEDGER.records)
+    storage.register('components', _components)
     storage.load()
 
     # ── RBAC ────────────────────────────────────────────────────────────────
@@ -98,9 +101,11 @@ def register(app, G):
 
     auth_gate = rbac_mod.make_auth_gate(rbac, auth_enabled)
 
-    # ── 资产 / 审批 ─────────────────────────────────────────────────────────
+    # ── 资产 / 审批 / 组件 ────────────────────────────────────────────────────
     asset_store = assets_mod.AssetStore(_assets)
     asset_store.rebuild_index()
+    comp_store = comp_mod.ComponentStore(_components)
+    comp_store.rebuild_index()
     approvals = approvals_mod.ApprovalStore(_approvals, audit_cb=_audit)
 
     # ── 全局钩子：登录保护 → 审批拦截 ──────────────────────────────────────
@@ -323,6 +328,76 @@ def register(app, G):
 
     # 扫描创建后自动匹配资产覆盖：见 app.py create_scan 中的调用
     # （app.ext_v3['assets'].mark_scan_coverage(target)）
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 组件管理（v3.6.0：资产 → 组件 → 漏洞 的中间层）
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    @app.route('/api/components', methods=['GET'])
+    def list_components():
+        return jsonify(comp_store.query(
+            ctype=request.args.get('type'), q=request.args.get('q'),
+            page=int(request.args.get('page', 1)), per=int(request.args.get('per_page', 100))))
+
+    @app.route('/api/components', methods=['POST'])
+    def create_component():
+        d = request.get_json(silent=True) or {}
+        comp, dup = comp_store.create(d.get('name', ''), d.get('version', ''),
+                                      d.get('type', 'other'),
+                                      vendor=d.get('vendor', ''), tags=d.get('tags', []),
+                                      notes=d.get('notes', ''))
+        if comp is None:
+            return jsonify({'error': dup}), 400
+        if dup == 'duplicate':
+            return jsonify({'component': comp, 'duplicate': True}), 200
+        _audit('component_create', f'新增组件 {comp["name"]} {comp["version"]}')
+        return jsonify(comp), 201
+
+    @app.route('/api/components/stats', methods=['GET'])
+    def components_stats():
+        return jsonify(comp_store.stats())
+
+    @app.route('/api/components/extract', methods=['POST'])
+    def extract_components():
+        d = request.get_json(silent=True) or {}
+        scan_id = d.get('scan_id', '')
+        if not scan_id:
+            # 默认对最近一次扫描提取
+            scans = scan_engine.get_all_scans()
+            scan_id = scans[0]['id'] if scans else ''
+        if not scan_id:
+            return jsonify({'error': '没有可提取的扫描'}), 400
+        created, updated = comp_store.extract_by_scan_id(scan_engine.get_scan, scan_id)[0] or (0, 0)
+        _audit('component_extract', f'从扫描 {scan_id} 提取组件：新增 {created}，更新 {updated}')
+        return jsonify({'created': created, 'updated': updated})
+
+    @app.route('/api/components/<cid>', methods=['GET', 'PUT', 'DELETE'])
+    def component_ops(cid):
+        if request.method == 'GET':
+            c = _components.get(cid)
+            return jsonify(c) if c else (jsonify({'error': '不存在'}), 404)
+        if request.method == 'PUT':
+            c = comp_store.update(cid, request.get_json(silent=True) or {})
+            if not c:
+                return jsonify({'error': '不存在'}), 404
+            _audit('component_update', f'更新组件 {c["name"]} {c["version"]}')
+            return jsonify(c)
+        c = comp_store.delete(cid)
+        if not c:
+            return jsonify({'error': '不存在'}), 404
+        _audit('component_delete', f'删除组件 {c["name"]} {c["version"]}')
+        return jsonify({'deleted': cid})
+
+    @app.route('/api/components/<cid>/vulns', methods=['GET', 'POST'])
+    def component_vulns(cid):
+        c = _components.get(cid)
+        if not c:
+            return jsonify({'error': '组件不存在'}), 404
+        if request.method == 'POST':
+            d = request.get_json(silent=True) or {}
+            comp_store.link_vuln(cid, d.get('vuln_id', ''))
+            _audit('component_link_vuln', f'组件 {c["name"]} 关联漏洞 {d.get("vuln_id", "")}')
+        vulns = [scan_engine.get_vulnerability(v) for v in c.get('vuln_ids', [])]
+        return jsonify([v for v in vulns if v])
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # 机器人接入
@@ -670,7 +745,8 @@ def register(app, G):
     app.ext_v3 = {
         'storage': storage, 'rbac': rbac, 'assets': asset_store,
         'approvals': approvals, 'channels': _bot_channels,
+        'components': comp_store,
         'save': storage.save,
     }
-    print('[ext_v3] v3.3 扩展模块已加载：资产管理 / RBAC / 审批 / 机器人 / SQLite 持久化 / AI 编排 / Token 用量统计')
+    print('[ext_v3] v3.3 扩展模块已加载：资产管理 / 组件管理 / RBAC / 审批 / 机器人 / SQLite 持久化 / AI 编排 / Token 用量统计')
     return app.ext_v3

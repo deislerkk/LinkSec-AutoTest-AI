@@ -18,6 +18,17 @@
 
 ## 迭代记录
 
+### v3.6.0（2026-11-16）· 完整迭代 🚀
+
+- 变更范围：后端 + 前端 + 文档
+- 内容：**组件管理**——目标主机软件组件台账（Web服务器/中间件/框架/数据库/组件库/操作系统/网络设备），补全「资产 → 组件 → 漏洞/CVE」关键中间层：
+  - 新增 `backend/components.py`：组件台账（名称+版本自动去重）、主机实例关联、漏洞关联、类型/关键词检索、统计
+  - 扫描完成后**自动从服务指纹提取组件**（nmap service/product/version → 组件，常见服务自动分类）；支持手动提取与手动录入
+  - 新接口：`GET/POST /api/components`、`/api/components/stats`、`/api/components/extract`、`GET/PUT/DELETE /api/components/:id`、`GET/POST /api/components/:id/vulns`
+  - 前端新增「组件管理」页（统计卡片/类型筛选/主机实例/漏洞关联/从扫描提取）
+  - 组件数据随 SQLite 持久化
+- 实测：提取 4 个组件（Tomcat/MySQL/nginx/OpenSSH，自动分类正确）、重复创建去重、主机实例关联、统计全部通过
+
 ### v3.5.0（2026-11-13）· 完整迭代 🚀
 
 - 变更范围：后端 + 前端 + 文档（安全整改）

@@ -45,6 +45,7 @@ body{background:var(--bg0);color:var(--text1);font-family:var(--font-mono);font-
 .nav-badge{margin-left:auto;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700}
 .nb-red{background:rgba(220,38,38,.12);color:var(--danger)}
 .nb-green{background:rgba(22,163,74,.12);color:var(--success)}
+.nb-purple{background:rgba(124,58,237,.12);color:var(--accent4)}
 .nb-blue{background:rgba(0,136,255,.12);color:var(--accent2)}
 .nb-orange{background:rgba(224,90,0,.12);color:var(--accent3)}
 .sidebar-divider{height:1px;background:var(--border);margin:6px 10px}
@@ -238,7 +239,7 @@ body{background:var(--bg0);color:var(--text1);font-family:var(--font-mono);font-
   <div class="logo">
     <div class="logo-icon"><img src="/logo.png" alt="LinkSec"></div>
     <div class="logo-text">LinkSec·<span>AutoTest AI</span></div>
-    <div class="logo-badge">v3.5.0</div>
+    <div class="logo-badge">v3.6.0</div>
   </div>
   <div class="topbar-right">
     <div class="status-dot" id="statusDot"></div>
@@ -258,6 +259,7 @@ body{background:var(--bg0);color:var(--text1);font-family:var(--font-mono);font-
       <div class="nav-item" onclick="nav('vulns',this)"><i class="ti ti-bug ni"></i>漏洞管理<span class="nav-badge nb-red" id="badgeVulns">0</span></div>
       <div class="nav-item" onclick="nav('chains',this)"><i class="ti ti-arrows-split-2 ni"></i>攻击链</div>
       <div class="nav-item" onclick="nav('assets',this)"><i class="ti ti-database ni"></i>资产管理<span class="nav-badge nb-blue" id="badgeAssets">0</span></div>
+      <div class="nav-item" onclick="nav('components',this)"><i class="ti ti-package ni"></i>组件管理<span class="nav-badge nb-purple" id="badgeComponents">0</span></div>
     </div>
     <div class="sidebar-divider"></div>
     <div class="sidebar-section">
@@ -487,7 +489,7 @@ function render() {
     chains:pgChains,c2:pgC2,webshells:pgWebshells,terminal:pgTerminal,
     knowledge:pgKnowledge,skills:pgSkills,tasks:pgTasks,ai:pgAI,
     audit:pgAudit,history:pgHistory,notifications:pgNotifications,settings:pgSettings,
-    assets:pgAssets,bots:pgBots,approvals:pgApprovals,users:pgUsers,tokens:pgTokens};
+    assets:pgAssets,bots:pgBots,approvals:pgApprovals,users:pgUsers,tokens:pgTokens,components:pgComponents};
   (pages[ST.page]||pgDashboard)();
 }
 
@@ -1649,7 +1651,7 @@ function pgSettings() {
     <div class="panel" style="margin-top:14px">
       <div class="panel-header"><div class="panel-title"><i class="ti ti-info-circle" style="font-size:13px"></i>平台信息</div></div>
       <div style="padding:16px;display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
-        ${[['平台名称','LinkSec·AutoTest AI'],['版本','v3.5.0'],['后端','Flask + Python'],['AI 模型','claude-sonnet-4'],['扫描引擎','Kali 工具链']].map(([l,v])=>`
+        ${[['平台名称','LinkSec·AutoTest AI'],['版本','v3.6.0'],['后端','Flask + Python'],['AI 模型','claude-sonnet-4'],['扫描引擎','Kali 工具链']].map(([l,v])=>`
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
           <div style="font-size:9px;color:var(--text3);margin-bottom:3px;text-transform:uppercase">${l}</div>
           <div style="font-size:11px;color:var(--text1);font-weight:600">${v}</div>
@@ -2133,6 +2135,137 @@ async function showTokenDetail(scopeId) {
       <td style="font-weight:700;color:var(--accent)">${r.total_tokens}</td>
     </tr>`).join('')}
     </tbody></table>`;
+}
+
+/* ═══════════════════════ v3.6 组件管理（资产 → 组件 → 漏洞 中间层）═══════════ */
+let compFilter = {type:'', q:''};
+function pgComponents() {
+  document.getElementById('mainArea').innerHTML = `
+  <div class="page-header"><div><div class="page-title">组件管理</div><div class="page-subtitle">目标主机软件组件台账：Web服务器/中间件/框架/数据库/库 · 扫描自动提取 · 漏洞关联</div></div>
+    <div class="header-actions">
+      <button class="btn" onclick="extractComponents()"><i class="ti ti-radar"></i>从扫描提取</button>
+      <button class="btn btn-primary" onclick="showNewComponentForm()"><i class="ti ti-plus"></i>新增组件</button>
+    </div></div>
+  <div class="scan-bar"><div class="scan-bar-inner">
+    <input class="target-input" id="compQ" placeholder="搜索：组件名 / 厂商 / 版本" onchange="compFilter.q=this.value;loadComponents()">
+    <select class="profile-select" id="compType" onchange="compFilter.type=this.value;loadComponents()">
+      <option value="">全部类型</option><option value="web_server">Web服务器</option><option value="middleware">中间件</option>
+      <option value="framework">框架</option><option value="database">数据库</option><option value="library">组件库</option>
+      <option value="os">操作系统</option><option value="device">网络设备</option><option value="other">其他</option>
+    </select>
+  </div></div>
+  <div class="content">
+    <div class="stat-grid" id="compStats"></div>
+    <div class="panel"><div id="compTable">加载中…</div></div>
+  </div>`;
+  loadComponents();
+}
+
+async function loadComponents() {
+  const stats = await api('/components/stats');
+  if (stats) {
+    document.getElementById('compStats').innerHTML = `
+      <div class="stat-card sc-blue"><div class="stat-label">组件总数</div><div class="stat-value" style="color:var(--accent2)">${stats.total}</div><div class="stat-sub">Web ${stats.by_type?.web_server||0} · 中间件 ${stats.by_type?.middleware||0} · 库 ${stats.by_type?.library||0}</div></div>
+      <div class="stat-card sc-teal"><div class="stat-label">主机覆盖</div><div class="stat-value" style="color:var(--accent)">${stats.hosts_covered}</div><div class="stat-sub">主机:端口实例</div></div>
+      <div class="stat-card sc-red"><div class="stat-label">关联漏洞</div><div class="stat-value" style="color:var(--danger)">${stats.with_vulns}</div><div class="stat-sub">组件存在关联 CVE</div></div>
+      <div class="stat-card sc-orange"><div class="stat-label">数据库组件</div><div class="stat-value" style="color:var(--warn)">${stats.by_type?.database||0}</div><div class="stat-sub">需重点关注</div></div>
+      <div class="stat-card sc-purple"><div class="stat-label">操作系统</div><div class="stat-value" style="color:var(--accent4)">${stats.by_type?.os||0}</div><div class="stat-sub">指纹识别</div></div>`;
+  }
+  const qs = new URLSearchParams();
+  if (compFilter.type) qs.set('type', compFilter.type);
+  if (compFilter.q) qs.set('q', compFilter.q);
+  const d = await api('/components?per_page=200' + (qs.toString() ? '&' + qs.toString() : ''));
+  const list = d?.data || [];
+  const typeCn = {web_server:'Web服务器',middleware:'中间件',framework:'框架',database:'数据库',library:'组件库',os:'操作系统',device:'网络设备',other:'其他'};
+  const typeColor = {web_server:'sev-med',middleware:'sev-high',framework:'sev-high',database:'sev-crit',library:'sev-med',os:'sev-low',device:'sev-low',other:'sev-low'};
+  document.getElementById('badgeComponents').textContent = list.length;
+  document.getElementById('compTable').innerHTML = `
+    <table class="data-table"><thead><tr><th>组件</th><th>版本</th><th>类型</th><th>厂商</th><th>主机实例</th><th>关联漏洞</th><th>来源</th><th>操作</th></tr></thead><tbody>
+    ${list.length ? list.map(c=>`<tr onclick="showComponent('${c.id}')">
+      <td><span class="vuln-name">${c.name}</span></td>
+      <td><span class="cve-tag">${c.version || '—'}</span></td>
+      <td><span class="sev-badge ${typeColor[c.type]||'sev-low'}">${typeCn[c.type]||c.type}</span></td>
+      <td>${c.vendor||'—'}</td>
+      <td style="color:var(--accent2)">${(c.hosts||[]).length}</td>
+      <td style="color:${(c.vuln_ids||[]).length?'var(--danger)':'var(--text3)'};font-weight:700">${(c.vuln_ids||[]).length}</td>
+      <td><span class="sev-badge ${c.source==='scan'?'sev-med':'sev-low'}">${c.source==='scan'?'扫描提取':'手动'}</span></td>
+      <td><button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteComponent('${c.id}')">删除</button></td>
+    </tr>`).join('') : '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:24px">暂无组件 — 执行扫描后自动从服务指纹提取，或点击右上角手动新增</td></tr>'}
+    </tbody></table>`;
+}
+
+function showComponent(id) {
+  openModal('组件详情', `
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <span class="sev-badge sev-high" id="cdType"></span>
+      <span class="sev-badge sev-med" id="cdSource"></span>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px" id="cdHeader"></div>
+    <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px">主机实例（资产 → 组件）</div>
+    <div id="cdHosts" style="margin-bottom:10px"></div>
+    <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px">关联漏洞（组件 → CVE）</div>
+    <div id="cdVulns" style="margin-bottom:10px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="closeModal()">关闭</button></div>`);
+  const c = null; // 延迟填充
+  api('/components?per_page=200').then(d => {
+    const comp = (d?.data||[]).find(x=>x.id===id);
+    if (!comp) return;
+    const typeCn = {web_server:'Web服务器',middleware:'中间件',framework:'框架',database:'数据库',library:'组件库',os:'操作系统',device:'网络设备',other:'其他'};
+    document.getElementById('cdType').textContent = typeCn[comp.type]||comp.type;
+    document.getElementById('cdSource').textContent = comp.source==='scan'?'扫描提取':'手动录入';
+    document.getElementById('cdHeader').innerHTML = `<span class="vuln-name">${comp.name}</span>${comp.version?`<span class="cve-tag">${comp.version}</span>`:''}${comp.vendor?`<span style="color:var(--text3)">${comp.vendor}</span>`:''}`;
+    document.getElementById('cdHosts').innerHTML = (comp.hosts||[]).length
+      ? (comp.hosts||[]).map(h=>`<span class="cve-tag" style="margin:2px">${h.ip}:${h.port} <span style="color:var(--text3)">${h.service||''}</span></span>`).join(' ')
+      : '<span style="color:var(--text3)">无主机实例</span>';
+    document.getElementById('cdVulns').innerHTML = (comp.vuln_ids||[]).length
+      ? `<div style="display:flex;flex-direction:column;gap:4px">${(comp.vuln_ids||[]).map(vid=>{ const v=ST.vulns.find(x=>x.id===vid); return v?`<div style="display:flex;gap:8px;align-items:center"><span class="sev-badge ${sevMap[v.severity]}">${sevCn[v.severity]}</span><span>${v.name}</span><span class="cve-tag">${v.cve}</span></div>`:'<span class="cve-tag">'+vid+'</span>'; }).join('')}</div>`
+      : '<span style="color:var(--text3)">无关联漏洞（POST /api/components/&lt;id&gt;/vulns 关联）</span>';
+  });
+}
+
+function showNewComponentForm() {
+  openModal('新增组件', `
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">组件名称</label><input class="form-input" id="cName" placeholder="如 Apache httpd / Log4j / MySQL"></div>
+      <div class="form-group"><label class="form-label">版本</label><input class="form-input" id="cVersion" placeholder="如 2.4.49"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">类型</label><select class="form-select" id="cType" style="width:100%">
+        <option value="web_server">Web服务器</option><option value="middleware">中间件</option><option value="framework">框架</option>
+        <option value="database">数据库</option><option value="library">组件库</option><option value="os">操作系统</option>
+        <option value="device">网络设备</option><option value="other">其他</option></select></div>
+      <div class="form-group"><label class="form-label">厂商</label><input class="form-input" id="cVendor" placeholder="如 Apache / Oracle"></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="createComponent()">保存</button></div>`);
+}
+
+async function createComponent() {
+  const d = await api('/components', {method:'POST', body: JSON.stringify({
+    name: document.getElementById('cName').value.trim(),
+    version: document.getElementById('cVersion').value.trim(),
+    type: document.getElementById('cType').value,
+    vendor: document.getElementById('cVendor').value.trim(),
+  })});
+  if (!d) { toast('保存失败','err'); return; }
+  if (d.duplicate) toast('该组件已存在（自动去重）','warn');
+  else toast('组件已新增','ok');
+  closeModal(); loadComponents();
+}
+
+async function deleteComponent(id) {
+  if (!confirm('确认删除该组件？')) return;
+  await api('/components/' + id, {method:'DELETE'});
+  toast('已删除','info'); loadComponents();
+}
+
+async function extractComponents() {
+  const scans = await api('/scans');
+  const scan = (scans||[])[0];
+  if (!scan) { toast('没有可提取的扫描任务','err'); return; }
+  const d = await api('/components/extract', {method:'POST', body: JSON.stringify({scan_id: scan.id})});
+  if (!d) { toast('提取失败','err'); return; }
+  toast(`从扫描 ${scan.id} 提取：新增 ${d.created}，更新 ${d.updated}`,'ok');
+  loadComponents();
 }
 
 /* ═══════════════════════════ 初始化 ════════════════════════════════════════ */

@@ -160,6 +160,7 @@ sudo docker compose up -d --build
 | 模块 | 说明 | 关键接口 |
 |------|------|---------|
 | 资产管理 | 域名/IP/端口/服务统一归档、自动去重、合并、CSV/JSON 导入导出、扫描覆盖跟踪、漏洞关联 | `/api/assets*` |
+| 组件管理（v3.6） | 主机软件组件台账（Web服务器/中间件/框架/数据库/库/OS/设备）、扫描服务指纹自动提取、主机实例与漏洞关联 | `/api/components*` |
 | 平台 RBAC | 多用户、角色（admin/operator/viewer）、登录令牌、按资源鉴权 | `/api/auth/*` `/api/users` `/api/roles` |
 | 人机协同审批 | 高危操作（C2 指令/WebShell 执行/终端命令/技能执行/Payload 生成）审批模式，决策留痕、通过后自动执行 | `/api/approvals*` |
 | 机器人接入 | 企业微信/钉钉/飞书/Slack/Telegram/QQ/通用 Webhook 通道管理、测试发送、群发 | `/api/bots/*` |
@@ -225,4 +226,4 @@ sudo docker compose up -d --build
 
 ---
 
-*LinkSec·AutoTest AI v3.5.0 — 仅供合法授权渗透测试使用*
+*LinkSec·AutoTest AI v3.6.0 — 仅供合法授权渗透测试使用*
