@@ -161,6 +161,9 @@ class RBAC:
         u.pop('salt', None)
         u['pwd'] = _make_pwd_hash(new)
         u['must_change_password'] = False
+        # v3.7：改密后吊销该用户全部 token（防旧会话继续使用）
+        for tk in [t for t, rec in self.tokens.items() if rec.get('user') == username]:
+            self.tokens.pop(tk, None)
         return True, None
 
     def delete_user(self, username, by):
@@ -212,6 +215,9 @@ def make_auth_gate(rbac, auth_enabled_getter):
         request._user = user   # 供后续钩子（如审批门）读取
         if request.method in ('GET', 'HEAD', 'OPTIONS'):
             return None  # 所有已登录角色可读
+        # v3.7：作用于自身的端点（登出/改自己密码）任何已登录角色可执行
+        if request.path in ('/api/auth/logout', '/api/auth/password'):
+            return None
         # 写操作鉴权
         seg = request.path.split('/api/')[1].split('/')[0] if '/api/' in request.path else ''
         if seg in ADMIN_ONLY_RES:

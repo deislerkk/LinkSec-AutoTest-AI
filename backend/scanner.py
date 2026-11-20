@@ -4,7 +4,6 @@ LinkSec·AutoTest AI — 真实扫描引擎
 """
 
 import uuid
-import time
 import subprocess
 import shutil
 import json
@@ -432,7 +431,6 @@ class ScanEngine:
 
     def _parse_enum4linux(self, scan_id: str, ip: str, output: str):
         """从 enum4linux 输出提取有价值的信息"""
-        scan = self._scans[scan_id]
         if 'Null session' in output or 'null session' in output:
             self._log(scan_id, 'warn', f'{ip} SMB 空会话（Null Session）可访问')
         users = re.findall(r'user:\[(.*?)\]', output)

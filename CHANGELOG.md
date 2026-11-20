@@ -19,6 +19,19 @@
 
 ## 迭代记录
 
+### v3.7.0（2026-11-20）· 完整迭代 🚀
+
+- 变更范围：后端 + 前端 + 部署（安全加固，依据 code-audit.md 修复）
+- 内容：
+  1. **H1 存储型 XSS 修复**：前端新增 `esc()` HTML 转义，项目名/漏洞名/主机/资产/组件/扫描目标等全部用户可控字段插值已转义（产品 83 处 + demo 70 处）
+  2. **H2 SSRF 修复**：`bots.py` 新增 `_validate_url`（仅 http/https，默认拒绝私网/回环/链路本地/保留地址），机器人 webhook 与通知发送均校验；内网自建场景可设 `LINKSEC_SSRF_ALLOW_PRIVATE=1` 放行
+  3. **H3 命令执行边界**：`_dangerous_cmd` 统一拦截（rm/mkfs/dd/shred/分区/关机等危险命令 + `> /dev/sd` 重定向模式），应用于终端 exec/stream 与 WebShell exec
+  4. **M2 CORS 收紧**：默认关闭跨域（同源部署），开发环境经 `LINKSEC_CORS_ORIGINS` 配置
+  5. **L2 改密吊销**：修改密码后吊销该用户全部 token
+  6. **L1 依赖升级**：flask 3.1.3 / flask-cors 6.0.1 / anthropic 0.40.0 / gunicorn 23.0.0
+  7. **M1 TLS**：新增 `docker/nginx-tls.conf` HTTPS/安全头示例；清理未使用 import
+- 交付物：`LinkSec_AutoTest_AI_v3.7.0.zip`、`LinkSec_AutoTest_AI_v3.7.0-UI1_功能演示demo.html`
+
 ### v3.6.0-UI5（2026-11-16）· 纯 UI 迭代 🎨
 
 - 变更范围：前端界面（开机动画背景升级，不涉及后端接口与部署）

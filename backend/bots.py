@@ -4,9 +4,43 @@ LinkSec·AutoTest AI — 机器人接入
 支持：企业微信 / 钉钉 / 飞书 / Slack / Telegram / QQ / 通用 Webhook。
 通道统一管理，通知可自动推送到启用的通道。
 """
+import ipaddress
 import json
+import os
+import socket
 import urllib.error
+import urllib.parse
 import urllib.request
+
+
+def _validate_url(url):
+    """v3.7：webhook SSRF 防护 — 仅允许 http/https，默认拒绝私网/回环/链路本地/保留地址。
+    自建内网机器人场景可设环境变量 LINKSEC_SSRF_ALLOW_PRIVATE=1 放行内网。"""
+    try:
+        u = urllib.parse.urlparse(url)
+    except Exception:
+        return 'URL 格式非法'
+    if u.scheme not in ('http', 'https'):
+        return '仅允许 http/https 协议'
+    host = u.hostname
+    if not host:
+        return '缺少主机名'
+    if os.environ.get('LINKSEC_SSRF_ALLOW_PRIVATE', '') in ('1', 'true', 'yes'):
+        return None
+    try:
+        port = u.port or (443 if u.scheme == 'https' else 80)
+        infos = socket.getaddrinfo(host, port)
+    except Exception:
+        return '无法解析主机'
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return f'拒绝内网/保留地址：{ip}'
+    return None
 
 # 平台 → {字段, payload 构建}
 CHANNEL_DEFS = {
@@ -93,6 +127,9 @@ def send_to_channel(channel, title, message, timeout=5):
         return '未配置参数'
     try:
         url, payload, headers = build_payload(ctype, cfg, title, message)
+        err = _validate_url(url)
+        if err:
+            return f'URL 校验失败：{err}'
         req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'),
                                      headers=headers, method='POST')
         with urllib.request.urlopen(req, timeout=timeout) as resp:

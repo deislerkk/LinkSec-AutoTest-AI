@@ -1,7 +1,7 @@
 # LinkSec·AutoTest AI
 ## 自动化渗透测试平台 — Kali Linux 部署指南
 
-> **当前版本**：`v3.6.0`（后端） · `v3.6.0-UI5`（界面） — 2026-11-16
+> **当前版本**：`v3.7.0`（后端） · `v3.7.0`（界面） — 2026-11-20
 >
 > **重要声明**：本平台仅供授权渗透测试使用。请确保已取得目标系统的书面授权，非法扫描可能违反法律法规。
 
@@ -228,4 +228,15 @@ sudo docker compose up -d --build
 
 ---
 
-*LinkSec·AutoTest AI v3.6.0 — 仅供合法授权渗透测试使用*
+## 十一、安全加固（v3.7）
+
+- **传输安全**：生产环境请启用 HTTPS，示例配置见 `docker/nginx-tls.conf`（含安全响应头 CSP/X-Frame-Options/nosniff）；登录凭证勿在纯 HTTP 公网传输。
+- **CORS**：默认关闭跨域（同源部署零配置）；开发时前端直连后端请设 `LINKSEC_CORS_ORIGINS=http://localhost:5500`。
+- **SSRF 防护**：机器人 webhook 默认拒绝私网/回环/保留地址；自建内网机器人场景设 `LINKSEC_SSRF_ALLOW_PRIVATE=1`。
+- **命令执行边界**：终端/WebShell 内置危险命令拦截（rm/mkfs/dd/分区/关机等）；仍建议仅在受控内网运行、审批模式开启、容器以最小权限运行。
+- **依赖**：flask 3.1.3 / flask-cors 6.0.1 / anthropic 0.40.0 / gunicorn 23.0.0。
+- 完整审计记录见 [docs/code-audit.md](docs/code-audit.md)。
+
+---
+
+*LinkSec·AutoTest AI v3.7.0 — 仅供合法授权渗透测试使用*

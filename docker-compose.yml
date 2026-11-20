@@ -17,6 +17,8 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - FLASK_ENV=production
+      - LINKSEC_CORS_ORIGINS=${LINKSEC_CORS_ORIGINS:-}
+      - LINKSEC_SSRF_ALLOW_PRIVATE=${LINKSEC_SSRF_ALLOW_PRIVATE:-}
     volumes:
       - /usr/share/wordlists:/usr/share/wordlists:ro   # 挂载宿主机字典
       - linksec-tmp:/tmp

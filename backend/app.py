@@ -10,14 +10,16 @@ v3.4：Token 用量统计（按单个任务/单次对话记录）
 
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
-import json, time, threading, uuid, subprocess, os
+import json, time, threading, uuid, subprocess, os, shlex
 from datetime import datetime
 from scanner import ScanEngine
 from ai_analyst import AIAnalyst
 from token_usage import LEDGER
 
 app = Flask(__name__)
-CORS(app)
+# v3.7：CORS 默认关闭跨域（同源部署无需跨域）；开发环境可设 LINKSEC_CORS_ORIGINS=http://localhost:5500
+_cors_origins = [o.strip() for o in os.environ.get('LINKSEC_CORS_ORIGINS', '').split(',') if o.strip()]
+CORS(app, origins=_cors_origins)
 
 scan_engine = ScanEngine()
 ai_analyst  = AIAnalyst()
@@ -37,12 +39,35 @@ _notifications = []
 def _now(): return datetime.now().isoformat()
 def _uid(): return str(uuid.uuid4())[:8]
 
+# v3.7：危险命令拦截（终端/WebShell 执行边界，尽力拦截破坏性操作）
+_DANGEROUS_CMDS = {'rm', 'mkfs', 'mkfs.ext4', 'mkfs.ext3', 'mkfs.xfs', 'dd', 'shred',
+                   'shutdown', 'reboot', 'poweroff', 'halt', 'format', 'fdisk',
+                   'parted', 'wipefs', 'dd', 'chmod', 'chown'}
+def _dangerous_cmd(cmd):
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError:
+        tokens = cmd.split()
+    if not tokens:
+        return False
+    base = os.path.basename(tokens[0])
+    if base in _DANGEROUS_CMDS:
+        return True
+    low = cmd
+    if ':(){' in low:
+        return True
+    if any(x in low for x in ('> /dev/sd', '> /dev/hd', '> /dev/nvme',
+                              'of=/dev/sd', 'of=/dev/hd', 'of=/dev/nvme',
+                              'rm -rf /', 'rm -rf /*')):
+        return True
+    return False
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 健康 & 仪表盘
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route('/api/health')
 def health():
-    return jsonify({'status':'online','version':'3.6.0','platform':'LinkSec·AutoTest AI','timestamp':_now()})
+    return jsonify({'status':'online','version':'3.7.0','platform':'LinkSec·AutoTest AI','timestamp':_now()})
 
 @app.route('/api/dashboard')
 def dashboard():
@@ -322,6 +347,8 @@ def webshell_exec(wid):
     if wid not in _webshells: return jsonify({'error':'不存在'}),404
     d = request.get_json()
     cmd = d.get('command','id')
+    if _dangerous_cmd(cmd):
+        return jsonify({'error':'命令被安全策略拦截'}),403
     # 仅执行本地命令用于演示（生产中应通过 HTTP 请求 WebShell）
     try:
         result = subprocess.check_output(cmd, shell=True, text=True, timeout=10)
@@ -341,9 +368,8 @@ def terminal_exec():
     d = request.get_json()
     cmd = d.get('command','').strip()
     if not cmd: return jsonify({'error':'命令不能为空'}),400
-    # 安全：拒绝危险命令
-    BLOCKED = ['rm -rf /','mkfs','dd if=/dev/zero',':(){ :|:& };:']
-    if any(b in cmd for b in BLOCKED):
+    # v3.7：危险命令拦截
+    if _dangerous_cmd(cmd):
         return jsonify({'error':'命令被安全策略拦截'}),403
     try:
         out = subprocess.check_output(cmd, shell=True, text=True, timeout=30,
@@ -364,6 +390,8 @@ def terminal_stream():
     """SSE 流式终端输出"""
     d = request.get_json()
     cmd = d.get('command','').strip()
+    if _dangerous_cmd(cmd):
+        return jsonify({'error':'命令被安全策略拦截'}),403
     def gen():
         try:
             proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
@@ -548,17 +576,22 @@ def send_notification():
     if d.get('channel') in ('dingtalk','feishu','wechat'):
         webhook = d.get('webhook','')
         if webhook:
-            try:
-                import urllib.request, urllib.error
-                payload = json.dumps({'msgtype':'text','text':{'content':f"{d['title']}\n{d['message']}"}}).encode()
-                req = urllib.request.Request(webhook, data=payload,
-                      headers={'Content-Type':'application/json'}, method='POST')
-                urllib.request.urlopen(req, timeout=5)
-                n['status']='sent'
-            except Exception as e:
-                # v3.5：异常细节不外传，仅留痕
-                print(f"[notify] webhook 发送异常：{e}")
-                n['status']='发送失败'
+            from bots import _validate_url
+            verr = _validate_url(webhook)
+            if verr:
+                n['status'] = f'URL 校验失败：{verr}'
+            else:
+                try:
+                    import urllib.request, urllib.error
+                    payload = json.dumps({'msgtype':'text','text':{'content':f"{d['title']}\n{d['message']}"}}).encode()
+                    req = urllib.request.Request(webhook, data=payload,
+                          headers={'Content-Type':'application/json'}, method='POST')
+                    urllib.request.urlopen(req, timeout=5)
+                    n['status']='sent'
+                except Exception as e:
+                    # v3.5：异常细节不外传，仅留痕
+                    print(f"[notify] webhook 发送异常：{e}")
+                    n['status']='发送失败'
         else:
             n['status']='无 webhook'
     else:
