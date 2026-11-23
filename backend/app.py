@@ -67,7 +67,7 @@ def _dangerous_cmd(cmd):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route('/api/health')
 def health():
-    return jsonify({'status':'online','version':'3.7.0','platform':'LinkSec·AutoTest AI','timestamp':_now()})
+    return jsonify({'status':'online','version':'3.8.0-beta.1','platform':'LinkSec·AutoTest AI','timestamp':_now()})
 
 @app.route('/api/dashboard')
 def dashboard():

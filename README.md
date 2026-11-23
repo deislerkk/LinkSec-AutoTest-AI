@@ -1,7 +1,9 @@
 # LinkSec·AutoTest AI
 ## 自动化渗透测试平台 — Kali Linux 部署指南
 
-> **当前版本**：`v3.7.0`（后端） · `v3.7.0`（界面） — 2026-11-20
+> **当前版本**：`v3.8.0-beta.1`（Ubuntu 测试版） · `v3.8.0-beta.1-UI1`（大字体界面） — 2026-11-23
+>
+> **稳定版**：`v3.7.0`（端口 80/5000）；测试版端口 18080/15000，可同机共存。
 >
 > **重要声明**：本平台仅供授权渗透测试使用。请确保已取得目标系统的书面授权，非法扫描可能违反法律法规。
 
@@ -239,4 +241,34 @@ sudo docker compose up -d --build
 
 ---
 
-*LinkSec·AutoTest AI v3.7.0 — 仅供合法授权渗透测试使用*
+## 十二、Ubuntu 测试版（v3.8.0-beta.1）
+
+测试版针对 Ubuntu 22.04/24.04 与桌面大字体显示优化，并使用独立端口，可与稳定版 v3.7.0 同机共存：
+
+| 版本 | 前端 | 后端 | 标识 |
+|------|------|------|------|
+| 稳定版 v3.7.0 | 80 | 5000 | `linksec-*` |
+| 测试版 v3.8.0-beta.1 | **18080** | **127.0.0.1:15000** | `linksec-test-*` / `linksec-test.service` |
+
+Docker 启动：
+
+```bash
+cp .env.test.example .env.test
+sudo docker compose -f docker-compose.test.yml --env-file .env.test up -d --build
+curl http://127.0.0.1:18080/api/health
+```
+
+Ubuntu 原生安装：
+
+```bash
+sudo bash deploy-ubuntu/install-test.sh
+systemctl status linksec-test
+```
+
+访问：`http://<Ubuntu服务器IP>:18080`。详细说明见 [deploy-ubuntu/README.md](deploy-ubuntu/README.md)。
+
+测试版 UI 字号：正文 15px、导航 13.5px、表格 12.5px、输入框 13.5px、页面标题 24px；小屏自动切换紧凑布局。
+
+---
+
+*LinkSec·AutoTest AI v3.8.0-beta.1 — 测试版本，仅供合法授权渗透测试使用*

@@ -1,0 +1,28 @@
+[Unit]
+Description=LinkSec AutoTest AI Beta Test Backend (v3.8.0-beta.1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=linksec-test
+Group=linksec-test
+WorkingDirectory=/opt/linksec-test/backend
+EnvironmentFile=-/etc/linksec-test.env
+Environment=FLASK_ENV=production
+Environment=LINKSEC_DB=/var/lib/linksec-test/linksec-test.db
+ExecStart=/opt/linksec-test/venv/bin/gunicorn --bind 127.0.0.1:15000 --workers 2 --threads 4 --timeout 600 app:app
+Restart=on-failure
+RestartSec=3
+
+# nmap SYN 等原始套接字能力；不以 root 运行
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/linksec-test
+
+[Install]
+WantedBy=multi-user.target

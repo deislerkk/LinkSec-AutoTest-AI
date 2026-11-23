@@ -1,0 +1,55 @@
+# LinkSec·AutoTest AI v3.8.0-beta.1 — Ubuntu Docker 测试栈
+# 与正式版 v3.7.0 同机共存：
+#   测试前端 http://<host>:18080
+#   测试后端 127.0.0.1:15000（经前端 /api 反代，不建议直接对公网开放）
+# 启动：docker compose -f docker-compose.test.yml --env-file .env.test up -d --build
+name: linksec-test
+
+services:
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: linksec-test-backend
+    restart: unless-stopped
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    network_mode: host
+    command:
+      - gunicorn
+      - --bind
+      - 127.0.0.1:15000
+      - --workers
+      - "2"
+      - --threads
+      - "4"
+      - --timeout
+      - "600"
+      - app:app
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      FLASK_ENV: production
+      LINKSEC_DB: /data/linksec-test.db
+      LINKSEC_CORS_ORIGINS: ${LINKSEC_TEST_CORS_ORIGINS:-}
+      LINKSEC_SSRF_ALLOW_PRIVATE: ${LINKSEC_SSRF_ALLOW_PRIVATE:-}
+    volumes:
+      - /usr/share/wordlists:/usr/share/wordlists:ro
+      - linksec-test-data:/data
+      - linksec-test-tmp:/tmp
+
+  frontend-test:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend-test
+    container_name: linksec-test-frontend
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - backend-test
+
+volumes:
+  linksec-test-data:
+    name: linksec-test-data
+  linksec-test-tmp:
+    name: linksec-test-tmp

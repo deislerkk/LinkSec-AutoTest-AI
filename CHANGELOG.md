@@ -19,6 +19,17 @@
 
 ## 迭代记录
 
+### v3.8.0-beta.1（2026-11-23）· 测试版本 🧪
+
+- 变更范围：前端 + Ubuntu 部署 + 端口隔离
+- 内容：
+  1. **大字体 UI**：正文 15px、导航 13.5px、表格 12.5px、输入框 13.5px、页面标题 24px；1200/900px 响应式布局，提升桌面可读性
+  2. **Ubuntu 22.04/24.04 适配**：提供 `deploy-ubuntu/install-test.sh`、独立 `linksec-test.service` 与 Nginx 配置；使用非 root 服务用户 + CAP_NET_RAW/CAP_NET_ADMIN
+  3. **同机共存端口隔离**：测试前端 `18080`、后端仅监听 `127.0.0.1:15000`；容器/服务/卷/数据库均采用 `linksec-test-*` 独立命名，不影响稳定版 v3.7.0 的 80/5000
+  4. **Docker 测试栈**：新增 `docker-compose.test.yml`、`.env.test.example`、`docker/nginx-test.conf`、`docker/Dockerfile.frontend-test`；前后端使用 host 网络，后端不对公网暴露
+  5. **API 同源路由**：前端统一使用同源 `/api`，测试前端 18080 自动反代测试后端 15000，不误连稳定版 5000
+- 交付物：`LinkSec_AutoTest_AI_v3.8.0-beta.1.zip`、`LinkSec_AutoTest_AI_v3.8.0-beta.1-UI1_功能演示demo.html`
+
 ### v3.7.0（2026-11-20）· 完整迭代 🚀
 
 - 变更范围：后端 + 前端 + 部署（安全加固，依据 code-audit.md 修复）
